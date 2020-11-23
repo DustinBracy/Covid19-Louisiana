@@ -9,7 +9,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-theme_set()
+options(scipen = 999)
+
 ```
 
 # Introduction
@@ -30,7 +31,7 @@ https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-
 library(tswge)
 library(tidyverse)
 
-ladata <- readxl::read_xlsx('./project/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx')
+ladata <- readxl::read_xlsx('./data/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx')
 
 laoverall <- ladata %>%
   group_by(`Lab Collection Date`) %>%
@@ -90,20 +91,20 @@ df <- data.frame('Predicted' = preds$f)
 df$Day = row(df)
 df$Actual = laoverall$positivity[240:246]
 df <- gather(df, key='Type', value, -Day)
-df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = laoverall$positivity[240:246]))
+df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = laoverall$positivity[233:239]))
 df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='AR(8) with Weekly Trend 7-Day Forecast')
 
 
 #fore.aruma.wge(laoverall$Positive, phi = e$phi, theta=e$theta, d = 1, s=7, n.ahead = 90, lastn = T, limits = F)
 
-preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi,  s=7, n.ahead = 90, lastn = T, limits = F)
+preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi, d=1,  s=7, n.ahead = 90, lastn = T, limits = F)
 ASE <- mean((preds$f - laoverall$positivity[153:242])^2)
 ASE #.001711292
 df <- data.frame('Predicted' = preds$f)
 df$Day = row(df)
 df$Actual = laoverall$positivity[153:242]
 df <- gather(df, key='Type', value, -Day)
-df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = laoverall$positivity[153:242]))
+df <- rbind(df, data.frame("Day"=c(-89:0), "Type" = 'Actual', value = laoverall$positivity[63:152]))
 df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='AR(8) with Weekly Trend 90-Day Forecast')
 
 
@@ -157,8 +158,8 @@ library(tidyverse)
 library(ggthemes)
 library(RColorBrewer)
 
-us <- read_csv('./project/national-history.csv')
-la <- read_csv('./project/louisiana-history.csv')
+us <- read_csv('./data/national-history.csv')
+la <- read_csv('./data/louisiana-history.csv')
 
 us$positivity <- us$positive/us$totalTestResults
 la$positivity <- la$positive/la$totalTestResults
@@ -220,40 +221,17 @@ e <- est.arma.wge(us.d1, p=1, q=1)
 #e <- est.arma.wge(us.s7, p=12, q=2)
 #e <- est.arma.wge(us.d1.s12, p=11, q=2)
 
-e$phi
-e$theta
+
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
+eval_model(us$positivity,preds$f,7,'ARIMA(1,1,1)', e$aic)
 
-e$aic
-
-ASE <- mean((preds$f - us$positivity[250:256])^2)
-ASE # 3.883034e-05
-
-df <- data.frame('Predicted' = preds$f)
-df$Day = row(df)
-df$Actual = us$positivity[250:256]
-df <- gather(df, key='Type', value, -Day)
-df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = us$positivity[250:256]))
-df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='ARIMA(1,1,1) 7-Day Forecast', x='Day', y='Positivity Rate')
-
-
-
-
+#90 day
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
-e$aic
+eval_model(us$positivity,preds$f,90,'ARIMA(1,1,1)', e$aic)
 
-ASE <- mean((preds$f - us$positivity[167:256])^2)
-ASE # 0.000451507
-
-df <- data.frame('Predicted' = preds$f)
-df$Day = row(df)
-df$Actual = us$positivity[167:256]
-df <- gather(df, key='Type', value, -Day)
-df <- rbind(df, data.frame("Day"=c(-89:0), "Type" = 'Actual', value = us$positivity[167:256]))
-df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='ARIMA(1,1,1) 90-Day Forecast', x='Day', y='Positivity Rate')
 
 
 
@@ -263,8 +241,42 @@ artrans.wge(us.d1, c(rep(0,11),1))
 
 us.d1.s7 <- artrans.wge(us$positivity, c(rep(0,6),1))
 
-
 aic5.wge(us.d1.7, p=0:12, q=0:5, type = 'bic')
 
+```
+
+```{r eval_model_function}
+
+eval_model <- function(response, predictions, num_predictions, model_type, AIC_val) {
+  test_stop <- length(response)
+  test_start <- test_stop - num_predictions + 1
+  compare_stop <- test_start - 1
+  compare_start <- compare_stop - num_predictions + 1
+  ASE <- mean((predictions - response[test_start:test_stop])^2)
+
+  df <- data.frame('Predicted' = predictions)
+  df$Day = row(df)
+  df$Actual = response[test_start:test_stop]
+  df <- gather(df, key='Type', value, -Day)
+  df <- rbind(
+    df, 
+    data.frame("Day"=c(((num_predictions-1)*-1):0), 
+               "Type" = 'Actual', 
+               value = response[compare_start:compare_stop]))
+  df %>% 
+    ggplot(aes(Day, value, color=Type)) + 
+    geom_line() + 
+    geom_point(size=.75) + 
+    labs(title=paste(model_type, 'Performance Evaluation'),
+         subtitle=paste0(num_predictions,'-Day Forecast'), 
+         x='Day', 
+         y='Positivity Rate',
+         caption=paste0('ASE: ',round(ASE,6),
+                       '\nAIC: ',round(AIC_val,6)))
+  
+}
+
+#example:
+#eval_model(us$positivity,preds$f,90,'ARIMA(12,1,2) + Weekly Trend', e$aic)
 ```
 
