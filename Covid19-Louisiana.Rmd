@@ -1,0 +1,270 @@
+---
+title: "COVID-19 in Louisiana - A Time Series Analysis"
+author: "Dustin Bracy"
+date: "11/19/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+theme_set()
+```
+
+# Introduction
+
+
+## Metrics used for reporting
+*positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
+
+The idea behind this test is that a high positivity score should give leaders indication that either infection is increasing at an unusual rate, or not enough tests are available.  The World Health Organization has recommended nations adopt a rule of thumb to keep populations under approximately 5% positivity rate before considering re-opening or relaxing social restrictions.
+
+The positivity rate improves upon strictly measuring the total number of cases or positive results by better accounting for new tests. As time goes on, more individuals will be re-tested, including high risk individuals such as health care workers, who may receive tests and positive results more frequently than others.  The positivity rate accounts for this by measuring the total number of positive cases against tests, which will show less bias than strictly reporting on positive cases, which can be inflated by duplicate tests and non-unique cases.  A better way to control this bias is to measure the people testing positive over the people who have been tested, although this data is much more difficult to collect, due to HIPAA and privacy concerns with linking data to individuals.
+
+## Sources used
+https://www.jhsph.edu/covid-19/articles/covid-19-testing-understanding-the-percent-positive.html
+https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-positivity-rate-really-mean
+
+```{r Louisiana}
+library(tswge)
+library(tidyverse)
+
+ladata <- readxl::read_xlsx('./project/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx')
+
+laoverall <- ladata %>%
+  group_by(`Lab Collection Date`) %>%
+  summarise(
+    Tests = sum(`Daily Test Count`),
+    Positive = sum(`Daily Positive Test Count`),
+    Negative = sum(`Daily Negative Test Count`),
+    Cases = sum(`Daily Case Count`)
+)
+laoverall <- laoverall[11:256,]
+ 
+laoverall$positivity = laoverall$Positive / laoverall$Tests
+
+plotts.sample.wge(laoverall$positivity)
+
+plotts.wge(laoverall$positivity)
+
+parzen.wge(laoverall$positivity, trun=100)
+
+aic5.wge(laoverall$positivity, p = 0:12, q=0:5, type='bic')
+
+# Take out 1-B
+la.d1 <- artrans.wge(laoverall$positivity,1)
+
+# Taking out another 1-B.. looks like it isn't enough
+artrans.wge(la.d1,1)
+
+# strong evidence of a 7 day cycle + possibly a monthly cycle
+la.d7 <- artrans.wge(laoverall$positivity, c(rep(0,6),1))
+
+# Take out a 1-B + the (1-B)^7.. looks like white noise
+la.d1.s7 <- artrans.wge(la.d7,1)
+
+artrans.wge(la.d1, c(rep(0,6),1))
+artrans.wge(la.d7, c(rep(0,11),1))
+
+#Take out a 7 day and 12 month cycle?
+artrans.wge(artrans.wge(laoverall$positivity, c(rep(0,11),1)), c(rep(0,6),1))
+
+# 1-B + s7
+aic5.wge(la.d1.s7, p=0:12, q=0:5, type='bic')
+e <- est.arma.wge(la.d1.s7,p = 12, q=2)
+e$aic
+preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi, theta=e$theta, d = 1, s=7, n.ahead = 7, lastn = T, limits = F)
+ASE <- mean((preds$f - laoverall$positivity[236:242])^2)
+ASE #.0007926095
+
+# s7
+aic5.wge(la.d7, p=0:12, q=0:5, type='bic')
+e <- est.ar.wge(la.d7,p = 8)
+preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi,  s=7, n.ahead = 7, lastn = T, limits = F)
+ASE <- mean((preds$f - laoverall$positivity[236:242])^2)
+ASE #.0009365157
+e$phi
+
+df <- data.frame('Predicted' = preds$f)
+df$Day = row(df)
+df$Actual = laoverall$positivity[240:246]
+df <- gather(df, key='Type', value, -Day)
+df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = laoverall$positivity[240:246]))
+df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='AR(8) with Weekly Trend 7-Day Forecast')
+
+
+#fore.aruma.wge(laoverall$Positive, phi = e$phi, theta=e$theta, d = 1, s=7, n.ahead = 90, lastn = T, limits = F)
+
+preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi,  s=7, n.ahead = 90, lastn = T, limits = F)
+ASE <- mean((preds$f - laoverall$positivity[153:242])^2)
+ASE #.001711292
+df <- data.frame('Predicted' = preds$f)
+df$Day = row(df)
+df$Actual = laoverall$positivity[153:242]
+df <- gather(df, key='Type', value, -Day)
+df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = laoverall$positivity[153:242]))
+df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='AR(8) with Weekly Trend 90-Day Forecast')
+
+
+#x = gen.arima.wge(200, phi = c(1.5,-.8), var=1, d=1, sn=31)
+#est.ar.wge(x,p=2)
+
+```
+
+```{r RollingWindowASE}
+
+modelA <- fore.aruma.wge(ts, phi = c(-.1, -.7), theta = .1, s = 12, n.ahead = 24, lastn = T)
+ASE_A <- mean((modelA$f - ts[477:500])^2)
+ASE_A
+
+modelB <- fore.aruma.wge(ts, phi = .8, n.ahead = 24, lastn = T)
+ASE_B <- mean((modelB$f - ts[477:500])^2)
+ASE_B
+
+#Q2c
+ASE_A = c()
+ASE_B = c()
+winsize = 24
+trainingsize = 50
+end = length(ts)
+for (x in 1:10){
+  beg = end - winsize + 1
+  #print(beg)
+  modelA <- fore.aruma.wge(ts[(end-trainingsize+1):end], phi = c(-.1, -.7), theta = .1, s = 12, n.ahead = winsize, lastn = T)
+  modelB <- fore.aruma.wge(ts[(end-trainingsize+1):end], phi = .8, n.ahead = winsize, lastn = T)
+  a <- mean((modelA$f - ts[beg:end])^2)
+  b <- mean((modelB$f - ts[beg:end])^2)
+  #print(end)
+  end = end - trainingsize
+  ASE_A[x] = a
+  ASE_B[x] = b
+}
+
+ASE_A
+summary(ASE_A)
+hist(ASE_A)
+
+ASE_B
+summary(ASE_B)
+hist(ASE_B)
+
+
+```
+
+```{r PositivityRateComparison}
+library(tidyverse)
+library(ggthemes)
+library(RColorBrewer)
+
+us <- read_csv('./project/national-history.csv')
+la <- read_csv('./project/louisiana-history.csv')
+
+us$positivity <- us$positive/us$totalTestResults
+la$positivity <- la$positive/la$totalTestResults
+
+ggplot(us, aes(date, positive/totalTestResults)) + geom_line() 
+ggplot(la, aes(date, positive/totalTestResults)) + geom_line()
+
+us$totalTestResults
+la$totalTestResults
+
+df <- data.frame(cbind(la[c('date', 'positivity')],  us[1:260,'positivity']))
+names(df) = c('date','LA','US')
+df
+
+gather(df, key = Region, value = 'Positivity Rate', -date) %>% 
+  ggplot(aes(date, `Positivity Rate`)) + geom_line(aes(color=Region), size=1) + labs(title='Louisiana vs US Positivity Rate', x = 'Date', y='Positivity Rate') + theme_fivethirtyeight() 
+
+
+df <- data.frame(cbind(la[c('date', 'positive')],  us[1:260,'positive']))
+names(df) = c('date','LA','US')
+df$US = df$US / 50
+
+gather(df, key = Region, value = 'Positivite Tests', -date) %>% 
+  ggplot(aes(date, `Positivite Tests`)) + geom_line(aes(color=Region), size=1) + labs(title='Louisiana vs US Positive Tests', x = 'Date', y='Positive Tests', subtitle = '*US numbers / 50') + theme_fivethirtyeight()
+
+```
+
+```{r USA}
+
+# Reverse order of df
+us <- us[order(us$date),]
+
+# Start on March 11
+us <- tail(us, 256)
+
+us$positivity <- us$positiveIncrease / us$totalTestResultsIncrease
+
+plotts.sample.wge(us$positivity)
+parzen.wge(us$positivity, trunc=200)
+
+
+us.d1 <- artrans.wge(us$positivity,1)
+parzen.wge(us.d1)
+
+#us.s7 <- artrans.wge(us$positivity, c(rep(0,6),1))
+#us.d1.s7 <- artrans.wge(us.d1, c(rep(0,6),1))
+us.s12 <- artrans.wge(us$positivity, c(rep(0,11),1))
+us.d1.s12 <- artrans.wge(us.s12,1)
+
+aic5.wge(us.d1, p=0:12, q=0:5 )
+#aic5.wge(us.s7, p=0:12, q=0:5, type='bic')
+#aic5.wge(us.d1.s12, p=0:12, q=0:5, type='bic')
+#plotts.sample.wge(us$positiveIncrease)
+
+#Some evidence of a 12 month seasonal trend
+est.ar.wge(us.d1, p=12)
+
+e <- est.arma.wge(us.d1, p=1, q=1)
+#e <- est.arma.wge(us.s7, p=12, q=2)
+#e <- est.arma.wge(us.d1.s12, p=11, q=2)
+
+e$phi
+e$theta
+
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
+#preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
+#preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
+
+e$aic
+
+ASE <- mean((preds$f - us$positivity[250:256])^2)
+ASE # 3.883034e-05
+
+df <- data.frame('Predicted' = preds$f)
+df$Day = row(df)
+df$Actual = us$positivity[250:256]
+df <- gather(df, key='Type', value, -Day)
+df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = us$positivity[250:256]))
+df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='ARIMA(1,1,1) 7-Day Forecast', x='Day', y='Positivity Rate')
+
+
+
+
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
+e$aic
+
+ASE <- mean((preds$f - us$positivity[167:256])^2)
+ASE # 0.000451507
+
+df <- data.frame('Predicted' = preds$f)
+df$Day = row(df)
+df$Actual = us$positivity[167:256]
+df <- gather(df, key='Type', value, -Day)
+df <- rbind(df, data.frame("Day"=c(-89:0), "Type" = 'Actual', value = us$positivity[167:256]))
+df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='ARIMA(1,1,1) 90-Day Forecast', x='Day', y='Positivity Rate')
+
+
+
+
+##### unknown stuff
+artrans.wge(us.d1, c(rep(0,11),1))
+
+us.d1.s7 <- artrans.wge(us$positivity, c(rep(0,6),1))
+
+
+aic5.wge(us.d1.7, p=0:12, q=0:5, type = 'bic')
+
+```
+
