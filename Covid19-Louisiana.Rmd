@@ -16,6 +16,8 @@ library(tidyverse)
 library(ggthemes)
 library(RColorBrewer)
 library(gridExtra)
+library(vars)
+library(nnfor)
 
 eval_model <- function(response, predictions, num_predictions, model_type, AIC_val) {
   test_stop <- length(response)
@@ -286,61 +288,44 @@ eval_model(us$positivity,preds$f,90,'ARIMA(1,1,1)', e$aic)
 
 
 
-
-##### unknown stuff
-artrans.wge(us.d1, c(rep(0,11),1))
-
-us.d1.s7 <- artrans.wge(us$positivity, c(rep(0,6),1))
-
-aic5.wge(us.d1.7, p=0:12, q=0:5, type = 'bic')
-
 ```
 
 
 
 ```{r Rolling_ASE_function}
 
-rolling_ASE <- function (df, train, p, q=0, d=1, s=0){
-  ASE_A = c()
-  winsize = 7
-  trainingsize = 49
-  end = length(df$positivity)
-  for (x in 1:round(end/trainingsize)){
-    beg = end - winsize + 1
-    print(paste('end',end))
-    print(paste('beg',beg))
-    print('heyyyyy')
-    print(train[end-trainingsize+1:end])
-    e <- est.arma.wge(train[end-trainingsize+1:end], p=p, q=q)
-    model <- fore.aruma.wge(df$positivity[(end-trainingsize+1):end], 
+rolling_ASE <- function (df, train, p, q=0, d=0, s=0, horizon){
+  ASE = c()
+  trainingsize = 30
+  test_stop <- length(df$positivity)
+
+  for (x in 1:7){
+    test_start <- test_stop - horizon + 1
+    train_start <- test_stop - trainingsize + 1
+    train_stop <- test_start - 1
+    print(paste0('test window: ',test_start,':',test_stop,
+                 ', train window: ',train_start,':',train_stop))
+    print(df$positivity[(test_stop-p-trainingsize):(test_stop-p)])
+    e <- est.arma.wge(train[train_start:train_stop], p=p, q=q)
+    model <- fore.aruma.wge(df$positivity[(test_stop-p-trainingsize):(test_stop-p)], 
                             phi=e$phi, 
                             theta=e$theta, 
                             s=s, 
                             d=d, 
-                            n.ahead = winsize, 
-                            lastn = T, 
+                            n.ahead = horizon, 
+                            lastn = F, 
                             limits = F)
-    a <- mean((model$f - df$positivity[beg:end])^2)
-    end = end - trainingsize
-    ASE_A[x] = a
+    a <- mean((model$f - df$positivity[test_start:test_stop])^2)
+    test_stop = test_stop - trainingsize
+    ASE[x] = a
   }
-  
-  ASE_A
-  summary(ASE_A)
-  hist(ASE_A)
+  hist(ASE)
+  return(summary(ASE))
 }
 
-rolling_ASE(us, us.d1, p=1)
+rolling_ASE(us, us.s12, p=12,s=12,q=2,d=1, horizon=7)
 
-#est.arma.wge(us.d1[length(us$positivity)-41+1:length(us$positivity)], p=1, q=0)
+us.s12[(217-12):(239-12)]
 
-us.d1[(length(us$positivity)-(41+1)):246]
-
-length(us$positivity)
-length(us$positivity)-41+1
-
-us.d1[206:246]
-
-us.s12
 ```
 
