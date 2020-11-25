@@ -96,22 +96,37 @@ https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-
 
 
 ```{r PositivityComparison}
+#census.gov populations on Jul 1, 2019
+
+lapopratio <- 4648794 / 328239523
+
 
 positivity_df <- data.frame(cbind(la[c('date', 'positivity')],  us['positivity']))
 names(positivity_df) = c('date','LA','US')
 
 positive_df <- data.frame(cbind(la[c('date', 'positive')],  us['positiveIncrease']))
 names(positive_df) = c('date','LA','US')
-positive_df$US = positive_df$US / 50
+positive_df$US = positive_df$US * lapopratio
 
 
 grid.arrange(
   gather(positivity_df, key = Region, value = 'Positivity Rate', -date) %>% 
-    ggplot(aes(date, `Positivity Rate`)) + geom_line(aes(color=Region), size=1) + labs(title='Louisiana vs US Positivity Rate', x = 'Date', y='Positivity Rate') + theme_fivethirtyeight(), 
+    ggplot(aes(date, `Positivity Rate`)) + 
+    geom_line(aes(color=Region), size=1) + 
+    labs(title='Louisiana vs US Positivity Rate', 
+         x = 'Date', 
+         y='Positivity Rate') +
+    theme_fivethirtyeight(), 
 
-  gather(positive_df, key = Region, value = 'Positivite Tests', -date) %>% 
-    ggplot(aes(date, `Positivite Tests`)) + geom_line(aes(color=Region), size=1) + labs(title='Louisiana vs US Daily New Positive Tests', x = 'Date', y='Positive Tests', subtitle = '*US numbers / 50') + theme_fivethirtyeight(),
-  ncol = 2)
+  gather(positive_df, key = Region, value = 'Positive Tests', -date) %>% 
+    ggplot(aes(date, `Positive Tests`)) + 
+    geom_line(aes(color=Region), size=1) + 
+    labs(title='Louisiana vs US Daily New Positive Tests', 
+         x = 'Date', 
+         y='Positive Tests', 
+         subtitle = '*US numbers scaled to 1.42%') + 
+    theme_fivethirtyeight(),
+  nrow = 2)
 
 ```
 
