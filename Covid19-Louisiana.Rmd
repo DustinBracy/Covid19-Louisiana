@@ -136,73 +136,65 @@ grid.arrange(
 ```{r Louisiana}
 
 
-plotts.sample.wge(laoverall$positivity)
+plotts.sample.wge(la$positivity)
 
-plotts.wge(laoverall$positivity)
+plotts.wge(la$positivity)
 
-parzen.wge(laoverall$positivity, trun=100)
+parzen.wge(la$positivity, trun=100)
 
-aic5.wge(laoverall$positivity, p = 0:12, q=0:5, type='bic')
+aic5.wge(la$positivity, p = 0:12, q=0:5, type='bic')
 
 # Take out 1-B
-la.d1 <- artrans.wge(laoverall$positivity,1)
+la.d1 <- artrans.wge(la$positivity,1)
 
 # Taking out another 1-B.. looks like it isn't enough
 artrans.wge(la.d1,1)
 
 # strong evidence of a 7 day cycle + possibly a monthly cycle
-la.d7 <- artrans.wge(laoverall$positivity, c(rep(0,6),1))
+la.s7 <- artrans.wge(la$positivity, c(rep(0,6),1))
 
 # Take out a 1-B + the (1-B)^7.. looks like white noise
-la.d1.s7 <- artrans.wge(la.d7,1)
+la.d1.s7 <- artrans.wge(la.d1, c(rep(0,6),1))
+la.d1.s7.s12 <- artrans.wge(la.d1, c(rep(0,6),1,0,0,0,0,1))
 
-artrans.wge(la.d1, c(rep(0,6),1))
-artrans.wge(la.d7, c(rep(0,11),1))
-
-#Take out a 7 day and 12 month cycle?
-artrans.wge(artrans.wge(laoverall$positivity, c(rep(0,11),1)), c(rep(0,6),1))
 
 # 1-B + s7
-aic5.wge(la.d1.s7, p=0:12, q=0:5, type='bic')
-e <- est.arma.wge(la.d1.s7,p = 12, q=2)
-e$aic
-preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi, theta=e$theta, d = 1, s=7, n.ahead = 7, lastn = T, limits = F)
-ASE <- mean((preds$f - laoverall$positivity[236:242])^2)
-ASE #.0007926095
+aic5.wge(la.d1.s7, p=0:15, q=0:5, type='bic') #BIC recommends 12/2>12/1>8/1>7/1>9/1
 
+aic5.wge(la.d1.s7.s12, p=0:15)
+
+e <- est.arma.wge(la.d1.s7,p = 12, q=2)
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 7, lastn = T, limits = F)
+eval_model(la$positivity,preds$f,7,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
+
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 90, lastn = T, limits = F)
+eval_model(la$positivity,preds$f,90,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .016857
+
+e <- est.arma.wge(la.d1.s7.s12,p = 12, q=2)
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
+eval_model(la$positivity,preds$f,7,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .002049
+
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=0, s=12, n.ahead = 90, lastn = T, limits = F)
+eval_model(la$positivity,preds$f,90,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .001054
+
+########## Sig Plus Noise ########## 
+preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 7, limits=F)
+eval_model(us$positivity,preds$f,7,'SigPlusNoise', 0) #ASE = .000255
+
+preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 90, limits=F)
+eval_model(us$positivity,preds$f,90,'SigPlusNoise', 0) #ASE = .002345 (BAD)
 
 
 # s7
 aic5.wge(la.d7, p=0:12, q=0:5, type='bic')
 e <- est.ar.wge(la.d7,p = 8)
-preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi,  s=7, n.ahead = 7, lastn = T, limits = F)
-ASE <- mean((preds$f - laoverall$positivity[236:242])^2)
-ASE #.0009365157
-e$phi
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 7, lastn = T, limits = F)
+eval_model(la$positivity,preds$f,7,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .002049
 
-df <- data.frame('Predicted' = preds$f)
-df$Day = row(df)
-df$Actual = laoverall$positivity[240:246]
-df <- gather(df, key='Type', value, -Day)
-df <- rbind(df, data.frame("Day"=c(-6:0), "Type" = 'Actual', value = laoverall$positivity[233:239]))
-df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='AR(8) with Weekly Trend 7-Day Forecast')
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 90, lastn = T, limits = F)
+eval_model(la$positivity,preds$f,90,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .001054
 
 
-#fore.aruma.wge(laoverall$Positive, phi = e$phi, theta=e$theta, d = 1, s=7, n.ahead = 90, lastn = T, limits = F)
-
-preds <- fore.aruma.wge(laoverall$positivity, phi = e$phi, d=1,  s=7, n.ahead = 90, lastn = T, limits = F)
-ASE <- mean((preds$f - laoverall$positivity[153:242])^2)
-ASE #.001711292
-df <- data.frame('Predicted' = preds$f)
-df$Day = row(df)
-df$Actual = laoverall$positivity[153:242]
-df <- gather(df, key='Type', value, -Day)
-df <- rbind(df, data.frame("Day"=c(-89:0), "Type" = 'Actual', value = laoverall$positivity[63:152]))
-df %>% ggplot(aes(Day, value, color=Type)) + geom_line() + geom_point(size=.75) + labs(title='AR(8) with Weekly Trend 90-Day Forecast')
-
-
-#x = gen.arima.wge(200, phi = c(1.5,-.8), var=1, d=1, sn=31)
-#est.ar.wge(x,p=2)
 
 ```
 
@@ -261,7 +253,7 @@ parzen.wge(us.d1)
 us.s12 <- artrans.wge(us$positivity, c(rep(0,11),1))
 us.d1.s12 <- artrans.wge(us.s12,1)
 
-aic5.wge(us.d1, p=0:12, q=0:5 )
+aic5.wge(us.d1, p=0:12, q=0:5, type='bic') # BIC says 1,1 AIC says 12,2
 #aic5.wge(us.s7, p=0:12, q=0:5, type='bic')
 #aic5.wge(us.d1.s12, p=0:12, q=0:5, type='bic')
 #plotts.sample.wge(us$positiveIncrease)
@@ -269,23 +261,41 @@ aic5.wge(us.d1, p=0:12, q=0:5 )
 #Some evidence of a 12 month seasonal trend
 est.ar.wge(us.d1, p=12)
 
+
+
+
 e <- est.arma.wge(us.d1, p=1, q=1)
+
 #e <- est.arma.wge(us.s7, p=12, q=2)
 #e <- est.arma.wge(us.d1.s12, p=11, q=2)
 
 #e < est.arma.wge(us$positivity, p = 1, q=0)
-fore.aruma.wge(us$positivity, phi=e$phi, n.ahead = 90, lastn = T)
+#fore.aruma.wge(us$positivity, phi=e$phi, n.ahead = 90, lastn = T)
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,7,'ARIMA(1,1,1)', e$aic)
+eval_model(us$positivity,preds$f,7,'ARIMA(1,1,1)', e$aic) #ASE = .000247
 
 #90 day
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,90,'ARIMA(1,1,1)', e$aic)
+eval_model(us$positivity,preds$f,90,'ARIMA(1,1,1)', e$aic)#ASE = .000395
 
+########## ARIMA(12,1,2) ########## 
+e <- est.arma.wge(us.d1, p=12, q=2)
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
+eval_model(us$positivity,preds$f,7,'ARIMA(12,1,2)', e$aic) #ASE = .000156
 
+#90 day
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
+eval_model(us$positivity,preds$f,90,'ARIMA(12,1,2)', e$aic) #ASE = .000472
+
+########## Sig Plus Noise ########## 
+preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 7, limits=F)
+eval_model(us$positivity,preds$f,7,'SigPlusNoise', 0) #ASE = .00019
+
+preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 90, limits=F)
+eval_model(us$positivity,preds$f,90,'SigPlusNoise', 0) #ASE = .002618 (BAD)
 
 
 ```
