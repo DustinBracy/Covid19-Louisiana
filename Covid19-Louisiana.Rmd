@@ -128,7 +128,7 @@ grid.arrange(
          y='Positive Tests', 
          subtitle = '*US numbers scaled to 1.42%') + 
     theme_fivethirtyeight(),
-  nrow = 2)
+  ncol = 2)
 
 ```
 
@@ -194,6 +194,21 @@ eval_model(la$positivity,preds$f,7,'AR(8) with Weekly Trend 7-Day Forecast', e$a
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 90, lastn = T, limits = F)
 eval_model(la$positivity,preds$f,90,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .001054
 
+
+ts_la <- ts(la$positivity[1:239], start = '1')
+x = mlp(ts_la, lags = 7, hd.auto.type = 'cv', reps=100)
+plot(x)
+preds <- predict(x, 7)
+plot(preds)
+eval_model(la$positivity,preds$mean,7,'NNFOR 7-Day Forecast', 0) #ASE = .000627
+
+
+ts_la <- ts(la$positivity[1:156], start = '1')
+x = mlp(ts_la, lags = 7, m = 1, hd.auto.type = 'cv', reps=100)
+plot(x)
+preds <- predict(x, 90)
+plot(preds)
+eval_model(la$positivity,preds$mean,90,'NNFOR 90-Day Forecast', 0) #ASE = .00085
 
 
 ```
@@ -297,6 +312,21 @@ eval_model(us$positivity,preds$f,7,'SigPlusNoise', 0) #ASE = .00019
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 90, limits=F)
 eval_model(us$positivity,preds$f,90,'SigPlusNoise', 0) #ASE = .002618 (BAD)
 
+
+ts_us <- ts(us$positivity[1:239], start = '1')
+x = mlp(ts_us, lags = 7, hd.auto.type = 'cv', reps=100)
+plot(x)
+preds <- predict(x, 7)
+plot(preds)
+eval_model(us$positivity,preds$mean,7,'NNFOR 7-Day Forecast', 0) #ASE = .000244
+
+
+ts_us <- ts(us$positivity[1:156], start = '1')
+x = mlp(ts_us, hd.auto.type = 'cv', reps=100, sel.lag = T)
+plot(x)
+preds <- predict(x, 90)
+plot(preds)
+eval_model(us$positivity,preds$mean,90,'NNFOR 90-Day Forecast', 0) #ASE = .00085
 
 ```
 
