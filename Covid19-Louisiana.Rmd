@@ -19,7 +19,8 @@ library(gridExtra)
 library(vars)
 library(nnfor)
 
-eval_model <- function(response, predictions, num_predictions, model_type, AIC_val) {
+eval_model <- function(response, predictions, model_name, AIC_val, ending_point=length(response)) {
+  num_predictions = length(predictions)
   test_stop <- length(response)
   test_start <- test_stop - num_predictions + 1
   compare_stop <- test_start - 1
@@ -27,6 +28,7 @@ eval_model <- function(response, predictions, num_predictions, model_type, AIC_v
   ASE <- mean((predictions - response[test_start:test_stop])^2)
 
   df <- data.frame('Predicted' = predictions)
+  print(df)
   df$Day = row(df)
   df$Actual = response[test_start:test_stop]
   df <- gather(df, key='Type', value, -Day)
@@ -35,21 +37,23 @@ eval_model <- function(response, predictions, num_predictions, model_type, AIC_v
     data.frame("Day"=c(((num_predictions-1)*-1):0), 
                "Type" = 'Actual', 
                value = response[compare_start:compare_stop]))
-  df %>% 
-    ggplot(aes(Day, value, color=Type)) + 
+  comparison_plot <- df %>% 
+    ggplot(aes(Day + ending_point - num_predictions, value, color=Type)) + 
     geom_line() + 
     geom_point(size=.75) + 
-    labs(title=paste(model_type, 'Performance Evaluation'),
-         subtitle=paste0(num_predictions,'-Day Forecast'), 
+    labs(title=paste(model_name, 'Performance Evaluation'),
+         subtitle=paste0(num_predictions,'-Day Forecast Window'), 
          x='Day', 
          y='Positivity Rate',
          caption=paste0('ASE: ',round(ASE,6),
                        '\nAIC: ',round(AIC_val,6)))
-  
+  return(comparison_plot)
 }
 
 #example:
-#eval_model(us$positivity,preds$f,90,'ARIMA(12,1,2) + Weekly Trend', e$aic)
+e <- est.arma.wge(us.d1, p=12, q=2)
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
+eval_model(us$positivity,preds$f,'ARIMA(12,1,2)', e$aic) #ASE = .000156
 
 
 # Get US Data & reverse order
@@ -79,7 +83,11 @@ us <- head(us, 246)
 la$positivity = la$positive / la$tests
 us$positivity <- us$positiveIncrease / us$totalTestResultsIncrease
 
-
+# Add temp data from WeatherUnderground.com historical data for MSY
+## Note Nov8 data missing from site, so imputed average of Nov7/9 was taken
+xdf <- read_csv('./data/temp.csv')
+xdf <- xdf[11:256,]
+xdf$GatheringBinary <- ifelse(is.na(xdf$Gathering), 0,1)
 ```
 
 # Introduction
@@ -134,7 +142,8 @@ grid.arrange(
 
 
 ```{r Louisiana}
-
+## TODO Jung Box Test
+## TODO Compare ACF/Spectral Densities
 
 plotts.sample.wge(la$positivity)
 
@@ -163,36 +172,37 @@ aic5.wge(la.d1.s7, p=0:15, q=0:5, type='bic') #BIC recommends 12/2>12/1>8/1>7/1>
 
 aic5.wge(la.d1.s7.s12, p=0:15)
 
+
 e <- est.arma.wge(la.d1.s7,p = 12, q=2)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,7,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
+eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,90,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .016857
+eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .016857
 
 e <- est.arma.wge(la.d1.s7.s12,p = 12, q=2)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
 eval_model(la$positivity,preds$f,7,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .002049
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=0, s=12, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,90,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .001054
+eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .001054
 
 ########## Sig Plus Noise ########## 
 preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 7, limits=F)
-eval_model(us$positivity,preds$f,7,'SigPlusNoise', 0) #ASE = .000255
+eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .000255
 
 preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 90, limits=F)
-eval_model(us$positivity,preds$f,90,'SigPlusNoise', 0) #ASE = .002345 (BAD)
+eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .002345 (BAD)
 
 
 # s7
 aic5.wge(la.d7, p=0:12, q=0:5, type='bic')
 e <- est.ar.wge(la.d7,p = 8)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,7,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .002049
+eval_model(la$positivity,preds$f,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .002049
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,90,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .001054
+eval_model(la$positivity,preds$f,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .001054
 
 
 ts_la <- ts(la$positivity[1:239], start = '1')
@@ -290,27 +300,29 @@ e <- est.arma.wge(us.d1, p=1, q=1)
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,7,'ARIMA(1,1,1)', e$aic) #ASE = .000247
+eval_model(us$positivity,preds$f,'ARIMA(1,1,1)', e$aic) #ASE = .000247
+
+e$ase
 
 #90 day
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,90,'ARIMA(1,1,1)', e$aic)#ASE = .000395
+eval_model(us$positivity,preds$f,'ARIMA(1,1,1)', e$aic)#ASE = .000395
 
 ########## ARIMA(12,1,2) ########## 
 e <- est.arma.wge(us.d1, p=12, q=2)
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,7,'ARIMA(12,1,2)', e$aic) #ASE = .000156
+eval_model(us$positivity,preds$f,'ARIMA(12,1,2)', e$aic) #ASE = .000156
 
 #90 day
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,90,'ARIMA(12,1,2)', e$aic) #ASE = .000472
+eval_model(us$positivity,preds$f,'ARIMA(12,1,2)', e$aic) #ASE = .000472
 
 ########## Sig Plus Noise ########## 
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 7, limits=F)
-eval_model(us$positivity,preds$f,7,'SigPlusNoise', 0) #ASE = .00019
+eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .00019
 
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 90, limits=F)
-eval_model(us$positivity,preds$f,90,'SigPlusNoise', 0) #ASE = .002618 (BAD)
+eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .002618 (BAD)
 
 
 ts_us <- ts(us$positivity[1:239], start = '1')
@@ -318,7 +330,7 @@ x = mlp(ts_us, lags = 7, hd.auto.type = 'cv', reps=100)
 plot(x)
 preds <- predict(x, 7)
 plot(preds)
-eval_model(us$positivity,preds$mean,7,'NNFOR 7-Day Forecast', 0) #ASE = .000244
+eval_model(us$positivity,preds$mean,'NNFOR 7-Day Forecast', 0) #ASE = .000244
 
 
 ts_us <- ts(us$positivity[1:156], start = '1')
@@ -326,7 +338,7 @@ x = mlp(ts_us, hd.auto.type = 'cv', reps=100, sel.lag = T)
 plot(x)
 preds <- predict(x, 90)
 plot(preds)
-eval_model(us$positivity,preds$mean,90,'NNFOR 90-Day Forecast', 0) #ASE = .00085
+eval_model(us$positivity,preds$mean,'NNFOR 90-Day Forecast', 0) #ASE = .00085
 
 ```
 
@@ -334,38 +346,92 @@ eval_model(us$positivity,preds$mean,90,'NNFOR 90-Day Forecast', 0) #ASE = .00085
 
 ```{r Rolling_ASE_function}
 
-rolling_ASE <- function (df, train, p, q=0, d=0, s=0, horizon){
+rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30, model_name){
   ASE = c()
-  trainingsize = 30
   test_stop <- length(df$positivity)
+  plot_list <- list()
+  loop_end <- floor(test_stop/(training_size+horizon))
 
-  for (x in 1:7){
+  for (x in 1:loop_end){
     test_start <- test_stop - horizon + 1
-    train_start <- test_stop - trainingsize + 1
+    train_start <- test_start - training_size 
     train_stop <- test_start - 1
     print(paste0('test window: ',test_start,':',test_stop,
                  ', train window: ',train_start,':',train_stop))
-    print(df$positivity[(test_stop-p-trainingsize):(test_stop-p)])
-    e <- est.arma.wge(train[train_start:train_stop], p=p, q=q)
-    model <- fore.aruma.wge(df$positivity[(test_stop-p-trainingsize):(test_stop-p)], 
-                            phi=e$phi, 
-                            theta=e$theta, 
+    data_window <- df$positivity[train_start:train_stop]
+    preds <- fore.aruma.wge(data_window, 
+                            phi=fitted_model$phi, 
+                            theta=fitted_model$theta, 
                             s=s, 
                             d=d, 
                             n.ahead = horizon, 
                             lastn = F, 
                             limits = F)
-    a <- mean((model$f - df$positivity[test_start:test_stop])^2)
-    test_stop = test_stop - trainingsize
+    a <- mean((preds$f - df$positivity[test_start:test_stop])^2)
     ASE[x] = a
+    print(a)
+    plot(
+      eval_model(
+        data_window,
+        preds$f, 
+        model_name, 
+        fitted_model$aic, 
+        ending_point = test_stop)
+      )
+    test_stop = test_stop - training_size
+    
+    
+
   }
   hist(ASE)
   return(summary(ASE))
 }
 
-rolling_ASE(us, us.s12, p=12,s=12,q=2,d=1, horizon=7)
+########## ARIMA(12,1,2) ########## 
+e <- est.arma.wge(us.d1, p=12, q=2)
 
-us.s12[(217-12):(239-12)]
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
+#eval_model(us$positivity,preds$f,7,'ARIMA(12,1,2)', e$aic) #ASE = .000156
+rolling_ASE(us, e, s=12, d=1, horizon=7,model_name = 'ARIMA(12,1,2)')
+
+#us.s12[(217-12):(239-12)]
+
+```
+
+```{r ConfidenceInterval}
+#Dr. Sadler's code for calculating confidence intervals:
+
+#(1-.9B)(1-.8B)Xt = at
+#(1-1.7B+.72B^2)Xt = at
+#Phi_1 = 1.7  Phi_2 = -.72
+
+s = c(5,8,9,8,7,6,4,3)
+
+#double check psi weights
+psi.weights.wge(phi = c(1.7, -.72), lag = 5)
+
+#AR(2)
+
+fit = fore.arma.wge(s,phi = c(1.7, -.72), n.ahead = 3)
+
+#forecasts for l = 1,2 and 3
+fit$f
+
+#Conf limits for l = 3
+# ll:   1.75415 - 1.96*sqrt(fit$wnv)*sqrt(1+1.7^2+ 2.17^2)
+# ul:   1.75415 + 1.96*sqrt(fit$wnv)*sqrt(1+1.7^2+ 2.17^2)
+fit$ll[3]
+fit$ul[3]
+
+#sigma_at_hat
+sqrt(fit$wnv)
+
+#Calc sigma_at_hat
+wnv = 1/(8-2) * sum(fit$resid[3:8]^2)
+```
+
+```{r}
+
 
 ```
 
