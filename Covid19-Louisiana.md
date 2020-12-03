@@ -3,9 +3,9 @@ It seems that the Covid pandemic will be an issue the World will deal with for a
 
 ## Goal 1: Data Collection
 
-As we all know, much of the data scientist’s (time series analyst’s) initial work on a project is gathering and cleaning the correct, or at least useful, data.  Currently it seems that the media and the government prefer to report the total number of cases and deaths per time period and geographic region.  Lately however, we have been hearing more about the “positivity rate” (aka “percent positive”, “positive percentage” and other names).  Research this statistic and decide which measure you feel is more telling about the current severity of the pandemic and the progress that the nation (or certain locals) are making in curbing it.  Report specifically on:
-  a.	What the “positivity rate” statistic is.
-  b.	Where you found raw data and information on the total number of cases, total number of deaths and the “positivity rate”.  
+As we all know, much of the data scientist's (time series analyst's) initial work on a project is gathering and cleaning the correct, or at least useful, data.  Currently it seems that the media and the government prefer to report the total number of cases and deaths per time period and geographic region.  Lately however, we have been hearing more about the "positivity rate" (aka "percent positive", "positive percentage" and other names).  Research this statistic and decide which measure you feel is more telling about the current severity of the pandemic and the progress that the nation (or certain locals) are making in curbing it.  Report specifically on:
+  a.	What the "positivity rate" statistic is.
+  b.	Where you found raw data and information on the total number of cases, total number of deaths and the "positivity rate".  
   c.	Provide an initial exploratory data analysis using data for your given state and the nation as a whole.  (Every group will be assigned their own State although each group will also analyze the nation as a whole.). The EDA should simply include a slide or two with time series plots, answers to the questions above and any other tables or charts that help convey the information you have gathered and that you think will be important in providing the forecasts.
 
 ## Goal 2: Univariate Analysis
@@ -85,7 +85,7 @@ Deliverable:
   2.	Submit your slides to 2DS under Initial Project Documentation and make sure your video URL is on the Google Doc. 
 
 Final Project Documentation and Presentation:
- Saturday, December 5th at 11:59am Central (“am” as I will need the rest of the day to start grading them before the final exam.)
+ Saturday, December 5th at 11:59am Central ("am" as I will need the rest of the day to start grading them before the final exam.)
 
   1.	Addressing a summary of Goal 1 and fully addressing Goal 2 and 3.  
   2.	PowerPoint Presentation (1 per group)
@@ -94,5 +94,5 @@ Final Project Documentation and Presentation:
   5.	Post that video to you-Tube (or provide Zoom link) and the (private) link to the Google-Doc and submit your ppt and Rmd File (or Jupyter notebook) to 2DS.  Please leave the link on the Google Doc for a week so others can learn from your presentation.  Please check out at least 3 of your peer’s presentations and please watch your own presentation as well.   It is often very useful (although always a bit awkward for me at least ;) to watch yourself present!
   6.	Submission
     a.	The link to your you-tube presentation on the Google-Doc
-    b.	your pptx (or slides in whatever form (pdf, Prezi, etc.) (Put in “Final Project Documentation.”)
-    c.	an R markdown (RMD) or Jupyter notebook or equivalent (Put in “Final Project Documentation.”) this file should contain all of your EDA, modeling and forecasting code and be very organized and well commented.
+    b.	your pptx (or slides in whatever form (pdf, Prezi, etc.) (Put in "Final Project Documentation.")
+    c.	an R markdown (RMD) or Jupyter notebook or equivalent (Put in "Final Project Documentation.") this file should contain all of your EDA, modeling and forecasting code and be very organized and well commented.
