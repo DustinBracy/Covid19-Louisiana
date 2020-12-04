@@ -28,7 +28,6 @@ eval_model <- function(response, predictions, model_name, AIC_val, ending_point=
   ASE <- mean((predictions - response[test_start:test_stop])^2)
 
   df <- data.frame('Predicted' = predictions)
-  print(df)
   df$Day = row(df)
   df$Actual = response[test_start:test_stop]
   df <- gather(df, key='Type', value, -Day)
@@ -174,6 +173,8 @@ aic5.wge(la.d1.s7.s12, p=0:15)
 
 
 e <- est.arma.wge(la.d1.s7,p = 12, q=2)
+ljung.wge(e$res, p=12,q=2, K=24)
+ljung.wge(e$res, p=12,q=2, K=48)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 7, lastn = T, limits = F)
 eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
 
@@ -181,6 +182,8 @@ preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.a
 eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .016857
 
 e <- est.arma.wge(la.d1.s7.s12,p = 12, q=2)
+ljung.wge(e$res, p=12,q=2, K=24)
+ljung.wge(e$res, p=12,q=2, K=48)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
 eval_model(la$positivity,preds$f,7,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .002049
 
@@ -198,6 +201,8 @@ eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .002345 (BAD)
 # s7
 aic5.wge(la.d7, p=0:12, q=0:5, type='bic')
 e <- est.ar.wge(la.d7,p = 8)
+ljung.wge(e$res, p=8, K=24)
+ljung.wge(e$res, p=8, K=48)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 7, lastn = T, limits = F)
 eval_model(la$positivity,preds$f,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .002049
 
@@ -287,9 +292,8 @@ aic5.wge(us.d1, p=0:12, q=0:5, type='bic') # BIC says 1,1 AIC says 12,2
 est.ar.wge(us.d1, p=12)
 
 
-
-
 e <- est.arma.wge(us.d1, p=1, q=1)
+ljung.wge(e$res, p=1,q=1, K=48)
 
 #e <- est.arma.wge(us.s7, p=12, q=2)
 #e <- est.arma.wge(us.d1.s12, p=11, q=2)
@@ -310,6 +314,9 @@ eval_model(us$positivity,preds$f,'ARIMA(1,1,1)', e$aic)#ASE = .000395
 
 ########## ARIMA(12,1,2) ########## 
 e <- est.arma.wge(us.d1, p=12, q=2)
+ljung.wge(e$res, p=12,q=2, K=24)
+ljung.wge(e$res, p=12,q=2, K=48)
+
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
 eval_model(us$positivity,preds$f,'ARIMA(12,1,2)', e$aic) #ASE = .000156
 
@@ -431,6 +438,14 @@ wnv = 1/(8-2) * sum(fit$resid[3:8]^2)
 ```
 
 ```{r}
+xdf2 <- dplyr::select(xdf, -one_of(c('Gathering','Weekday')))
+xdf2 <- ts(xdf2, start = 1)
+
+x = mlp(ts_la, hd.auto.type = 'cv', reps=100, sel.lag = T, xreg = xdf2)
+plot(x)
+preds <- predict(x, 90)
+plot(preds)
+eval_model(la$positivity,preds$mean,'NNFOR 90-Day Forecast', 0) #ASE = .00085
 
 
 ```
