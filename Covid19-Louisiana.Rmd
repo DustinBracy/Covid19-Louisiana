@@ -19,49 +19,12 @@ library(gridExtra)
 library(vars)
 library(nnfor)
 
-eval_model <- function(response, predictions, model_name, AIC_val, ending_point=length(response)) {
-  num_predictions = length(predictions)
-  test_stop <- length(response)
-  test_start <- test_stop - num_predictions + 1
-  compare_stop <- test_start - 1
-  compare_start <- compare_stop - num_predictions + 1
-  ASE <- mean((predictions - response[test_start:test_stop])^2)
-
-  df <- data.frame('Predicted' = predictions)
-  df$Day = row(df)
-  df$Actual = response[test_start:test_stop]
-  df <- gather(df, key='Type', value, -Day)
-  df <- rbind(
-    df, 
-    data.frame("Day"=c(((num_predictions-1)*-1):0), 
-               "Type" = 'Actual', 
-               value = response[compare_start:compare_stop]))
-  comparison_plot <- df %>% 
-    ggplot(aes(Day + ending_point - num_predictions, value, color=Type)) + 
-    geom_line() + 
-    geom_point(size=.75) + 
-    labs(title=paste(model_name, 'Performance Evaluation'),
-         subtitle=paste0(num_predictions,'-Day Forecast Window'), 
-         x='Day', 
-         y='Positivity Rate',
-         caption=paste0('ASE: ',round(ASE,6),
-                       '\nAIC: ',round(AIC_val,6)))
-  return(comparison_plot)
-}
-
-#example:
-e <- est.arma.wge(us.d1, p=12, q=2)
-preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,'ARIMA(12,1,2)', e$aic) #ASE = .000156
-
-
 # Get US Data & reverse order
 us <- read_csv('./data/national-history.csv')
 us <- us[order(us$date),]
 
 # Get LA Data & consolidate to state level
 ladata <- readxl::read_xlsx('./data/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx')
-
 la <- ladata %>%
   group_by(date = `Lab Collection Date`) %>%
   summarise(
@@ -71,29 +34,95 @@ la <- ladata %>%
     cases = sum(`Daily Case Count`)
 )
 
+# Create Positivity features
+la$positivity = la$positive / la$tests
+us$positivity <- us$positiveIncrease / us$totalTestResultsIncrease
+
+# Get temp data from WeatherUnderground.com (historical data for MSY)
+## Note Nov8 data missing from site, so imputed average of Nov7+9 was taken
+xdf <- read_csv('./data/temp.csv')
+xdf$GatheringBinary <- as.numeric(ifelse(is.na(xdf$Gathering), 0,1))
 
 # Start on March 11, end on Nov 11
 la <- la[11:256,]
 us <- tail(us, 256)
 us <- head(us, 246)
-
-
-# Create Positivity features
-la$positivity = la$positive / la$tests
-us$positivity <- us$positiveIncrease / us$totalTestResultsIncrease
-
-# Add temp data from WeatherUnderground.com historical data for MSY
-## Note Nov8 data missing from site, so imputed average of Nov7/9 was taken
-xdf <- read_csv('./data/temp.csv')
 xdf <- xdf[11:256,]
-xdf$GatheringBinary <- ifelse(is.na(xdf$Gathering), 0,1)
+
+
+eval_model <- function(response, predictions, pred_ul = NA, pred_ll = NA, model_name, AIC_val = 0, ending_point = length(response)) {
+  num_predictions = length(predictions)
+  test_stop <- length(response)
+  test_start <- test_stop - num_predictions + 1
+  compare_stop <- test_start - 1
+  compare_start <- compare_stop - num_predictions + 1
+  ASE <- mean((predictions - response[test_start:test_stop])^2)
+
+  # Build predictions dataframe
+  df <- data.frame('Predicted' = predictions)
+  df$Day = row(df)
+  df$Actual = response[test_start:test_stop]
+  df <- gather(df, key='Type', value, -Day)
+  
+  #if we have enough data to plot num_predictions * 2, do it, else use num_predictions
+  starting_point <- compare_start - num_predictions + 1
+  plot_start <- ifelse(starting_point < 0, compare_start, starting_point)
+  day_multiplier <- ifelse(starting_point < 0, -1,-2)
+  
+  # Build predicted vs actual dataframe
+  df <- rbind(df, 
+    data.frame("Day"=c(((num_predictions-1)*day_multiplier):0), 
+               "Type" = 'Actual', 
+               value = response[plot_start:compare_stop]))
+
+  # Built UL/LL dataframes
+  ul <- data.frame("Day"=c(1:num_predictions), pred_ul)
+  ll <- data.frame("Day"=c(1:num_predictions), pred_ll)
+  
+  # Build Plot
+  comparison_plot <- ggplot() + 
+    geom_line(data=df, aes(Day + ending_point - num_predictions, value, color=Type)) + 
+    geom_point(size=.75) + 
+    labs(title=paste(model_name, 'Performance Evaluation'),
+         subtitle=paste0(num_predictions,'-Day Forecast'), 
+         x='Day', 
+         y='Positivity Rate',
+         caption=paste0('ASE: ',round(ASE,6),
+                       '\nAIC: ',round(AIC_val,6)))
+  
+  # Add confidence intervals if supplied
+  if (length(pred_ul) == length(predictions)){
+    comparison_plot = comparison_plot + 
+      geom_line(aes(ul$Day + ending_point - num_predictions, ul$pred_ul), 
+                color='grey70', linetype = "dashed") 
+  }
+  if (length(pred_ll) == length(predictions)){
+    comparison_plot = comparison_plot + 
+      geom_line(aes(ll$Day + ending_point - num_predictions, ll$pred_ll), 
+                color='grey70', linetype = "dashed") 
+    }
+  
+  return(comparison_plot)
+}
+
+
+
+#example:
+e <- est.arma.wge(us.d1, p=12, q=2)
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
+eval_model(us$positivity, preds$f, preds$ul, preds$ll, model_name = 'ARIMA(12,1,2)', AIC_val = e$aic) #ASE = .000156
+
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
+eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARIMA(12,1,2)', e$aic) 
+
+
 ```
 
 # Introduction
-
+My name is Dustin Bracy, and this is a time series analysis of COVID-19 data in Louisiana and the United States spanning an 8 month period from the declaration of the pandemic on March 11, 2020 through November 11, 2020.
 
 ## Metrics used for reporting
-*positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
+*Positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
 
 The idea behind this test is that a high positivity score should give leaders indication that either infection is increasing at an unusual rate, or not enough tests are available.  The World Health Organization has recommended nations adopt a rule of thumb to keep populations under approximately 5% positivity rate before considering re-opening or relaxing social restrictions.
 
@@ -105,10 +134,9 @@ https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-
 
 
 ```{r PositivityComparison}
-#census.gov populations on Jul 1, 2019
 
+#census.gov reported populations on Jul 1, 2019: Louisiana / USA
 lapopratio <- 4648794 / 328239523
-
 
 positivity_df <- data.frame(cbind(la[c('date', 'positivity')],  us['positivity']))
 names(positivity_df) = c('date','LA','US')
@@ -176,26 +204,26 @@ e <- est.arma.wge(la.d1.s7,p = 12, q=2)
 ljung.wge(e$res, p=12,q=2, K=24)
 ljung.wge(e$res, p=12,q=2, K=48)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .016857
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .016857
 
 e <- est.arma.wge(la.d1.s7.s12,p = 12, q=2)
 ljung.wge(e$res, p=12,q=2, K=24)
 ljung.wge(e$res, p=12,q=2, K=48)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,7,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .002049
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,7,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .002049
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=0, s=12, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .001054
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .001054
 
 ########## Sig Plus Noise ########## 
 preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 7, limits=F)
-eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .000255
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .000255
 
 preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 90, limits=F)
-eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .002345 (BAD)
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .002345 (BAD)
 
 
 # s7
@@ -204,10 +232,10 @@ e <- est.ar.wge(la.d7,p = 8)
 ljung.wge(e$res, p=8, K=24)
 ljung.wge(e$res, p=8, K=48)
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .002049
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .002049
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .001054
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .001054
 
 
 ts_la <- ts(la$positivity[1:239], start = '1')
@@ -304,13 +332,13 @@ ljung.wge(e$res, p=1,q=1, K=48)
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
 #preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,'ARIMA(1,1,1)', e$aic) #ASE = .000247
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'ARIMA(1,1,1)', e$aic) #ASE = .000247
 
 e$ase
 
 #90 day
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,'ARIMA(1,1,1)', e$aic)#ASE = .000395
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'ARIMA(1,1,1)', e$aic)#ASE = .000395
 
 ########## ARIMA(12,1,2) ########## 
 e <- est.arma.wge(us.d1, p=12, q=2)
@@ -318,18 +346,18 @@ ljung.wge(e$res, p=12,q=2, K=24)
 ljung.wge(e$res, p=12,q=2, K=48)
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,'ARIMA(12,1,2)', e$aic) #ASE = .000156
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2)', e$aic) #ASE = .000156
 
 #90 day
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f,'ARIMA(12,1,2)', e$aic) #ASE = .000472
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2)', e$aic) #ASE = .000472
 
 ########## Sig Plus Noise ########## 
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 7, limits=F)
-eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .00019
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .00019
 
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 90, limits=F)
-eval_model(us$positivity,preds$f,'SigPlusNoise', 0) #ASE = .002618 (BAD)
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .002618 (BAD)
 
 
 ts_us <- ts(us$positivity[1:239], start = '1')
@@ -381,8 +409,10 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
       eval_model(
         data_window,
         preds$f, 
-        model_name, 
-        fitted_model$aic, 
+        model_name = model_name, 
+        AIC_val = fitted_model$aic, 
+        pred_ul = preds$ul, 
+        pred_ll = preds$ll,
         ending_point = test_stop)
       )
     test_stop = test_stop - training_size
@@ -398,8 +428,8 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
 e <- est.arma.wge(us.d1, p=12, q=2)
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
-#eval_model(us$positivity,preds$f,7,'ARIMA(12,1,2)', e$aic) #ASE = .000156
-rolling_ASE(us, e, s=12, d=1, horizon=7,model_name = 'ARIMA(12,1,2)')
+#eval_model(us$positivity,preds$f, preds$ul, preds$ll,7,'ARIMA(12,1,2)', e$aic) #ASE = .000156
+rolling_ASE(us, e, s=12, d=1, horizon=7, model_name = 'ARIMA(12,1,2)')
 
 #us.s12[(217-12):(239-12)]
 
@@ -438,14 +468,27 @@ wnv = 1/(8-2) * sum(fit$resid[3:8]^2)
 ```
 
 ```{r}
-xdf2 <- dplyr::select(xdf, -one_of(c('Gathering','Weekday')))
-xdf2 <- ts(xdf2, start = 1)
 
-x = mlp(ts_la, hd.auto.type = 'cv', reps=100, sel.lag = T, xreg = xdf2)
+la_XDF <- data.frame(
+  temp = ts(xdf$AvgTempF),
+  humidity = ts(xdf$AvgHumidityPercent),
+  wind = ts(xdf$AvgWindSpeedMPH),
+  precip <- ts(xdf$PrecipitationIN),
+  gathering <- ts(xdf$GatheringBinary)
+)
+
+x = mlp(ts_la, hd.auto.type = 'cv', reps=100, sel.lag = T, xreg = la_XDF)
 plot(x)
-preds <- predict(x, 90)
+
+## 7 day forecast
+preds <- forecast(x, h=7, xreg=la_XDF)
 plot(preds)
-eval_model(la$positivity,preds$mean,'NNFOR 90-Day Forecast', 0) #ASE = .00085
+eval_model(la$positivity, preds$mean,preds$mean,preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .00085
+
+## 90 day forecast
+preds <- forecast(x, h=90, xreg=xdf2)
+plot(preds)
+eval_model(la$positivity, preds$mean,preds$mean,preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .00085
 
 
 ```
