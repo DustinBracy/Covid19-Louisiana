@@ -101,7 +101,7 @@ eval_model <- function(response, predictions, pred_ul = NA, pred_ll = NA, model_
       geom_line(aes(ll$Day + ending_point - num_predictions, ll$pred_ll), 
                 color='grey70', linetype = "dashed") 
     }
-  
+  #print(ggplot_build(comparison_plot)$data)
   return(comparison_plot)
 }
 
@@ -119,7 +119,7 @@ eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARIMA(12,1,2)', e$aic)
 ```
 
 # Introduction
-My name is Dustin Bracy, and this is a time series analysis of COVID-19 data in Louisiana and the United States spanning an 8 month period from the declaration of the pandemic on March 11, 2020 through November 11, 2020.
+My name is Dustin Bracy, and this is a time series analysis of COVID-19 data in Louisiana and the United States spanning an 8 month period from the declaration of the pandemic on March 11, 2020 through November 11, 2020.  We will explore the difference between new daily positive cases and positivity rates, and why one may be more advantageous.  Next we'll walk through univiariate and multivariate analyses of both Louisiana and national numbers.  Finally we'll wrap up with a comparison of model performance for each use case.
 
 ## Metrics used for reporting
 *Positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
@@ -161,7 +161,7 @@ grid.arrange(
     labs(title='Louisiana vs US Daily New Positive Tests', 
          x = 'Date', 
          y='Positive Tests', 
-         subtitle = '*US numbers scaled to 1.42%') + 
+         subtitle = '*US numbers scaled to 1.42% based on LA population density') + 
     theme_fivethirtyeight(),
   ncol = 2)
 
@@ -193,6 +193,58 @@ la.s7 <- artrans.wge(la$positivity, c(rep(0,6),1))
 la.d1.s7 <- artrans.wge(la.d1, c(rep(0,6),1))
 la.d1.s7.s12 <- artrans.wge(la.d1, c(rep(0,6),1,0,0,0,0,1))
 
+parzen.wge(la.d1.s7, trun=100)
+parzen.wge(la.s7, trun=100)
+
+la.s7.s12 <- artrans.wge(la$positive, c(rep(0,6),1,0,0,0,0,1,0,1))
+pacf(la.s7)
+acf(la.s7)
+
+parzen.wge(la.s7.s12, trun=100)
+aic5.wge(la.s7.s12, type = 'bic', p=0:15,q=0:2) #12/2, 8/1, 3/2
+
+
+e <- est.arma.wge(la.s7.s12,p = 12, q=2)
+# looks like white noise
+plotts.wge(e$res)
+ljung.wge(e$res, p=12,q=2, K=24)
+ljung.wge(e$res, p=12,q=2, K=48)
+
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'ARMA(12,2) With Weekly/Monthly Trend', e$aic) #ASE .000192
+
+
+e <- est.arma.wge(la.s7.s12,p = 8, q=1)
+plotts.wge(e$res)
+ljung.wge(e$res, p=8,q=1, K=24)
+ljung.wge(e$res, p=8,q=1, K=48)
+
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'ARMA(8,1) With Weekly/Monthly Trend', e$aic) #ASE .000196
+
+e <- est.arma.wge(la.s7.s12,p = 3, q=2)
+plotts.wge(e$res)
+ljung.wge(e$res, p=3,q=2, K=24)
+ljung.wge(e$res, p=3,q=2, K=48)
+
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000222
+
+####
+
+e <- est.arma.wge(la.s7.s12,p = 12, q=2)
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000609
+
+e <- est.arma.wge(la.s7.s12,p = 8, q=1)
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000509
+
+e <- est.arma.wge(la.s7.s12,p = 3, q=2)
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000289
+
+
 
 # 1-B + s7
 aic5.wge(la.d1.s7, p=0:15, q=0:5, type='bic') #BIC recommends 12/2>12/1>8/1>7/1>9/1
@@ -203,6 +255,9 @@ aic5.wge(la.d1.s7.s12, p=0:15)
 e <- est.arma.wge(la.d1.s7,p = 12, q=2)
 ljung.wge(e$res, p=12,q=2, K=24)
 ljung.wge(e$res, p=12,q=2, K=48)
+plotts.wge(e$res)
+
+
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 7, lastn = T, limits = F)
 eval_model(la$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
 
@@ -252,46 +307,6 @@ plot(x)
 preds <- predict(x, 90)
 plot(preds)
 eval_model(la$positivity,preds$mean,90,'NNFOR 90-Day Forecast', 0) #ASE = .00085
-
-
-```
-
-```{r RollingWindowASE}
-
-modelA <- fore.aruma.wge(ts, phi = c(-.1, -.7), theta = .1, s = 12, n.ahead = 24, lastn = T)
-ASE_A <- mean((modelA$f - ts[477:500])^2)
-ASE_A
-
-modelB <- fore.aruma.wge(ts, phi = .8, n.ahead = 24, lastn = T)
-ASE_B <- mean((modelB$f - ts[477:500])^2)
-ASE_B
-
-#Q2c
-ASE_A = c()
-ASE_B = c()
-winsize = 24
-trainingsize = 50
-end = length(ts)
-for (x in 1:10){
-  beg = end - winsize + 1
-  #print(beg)
-  modelA <- fore.aruma.wge(ts[(end-trainingsize+1):end], phi = c(-.1, -.7), theta = .1, s = 12, n.ahead = winsize, lastn = T)
-  modelB <- fore.aruma.wge(ts[(end-trainingsize+1):end], phi = .8, n.ahead = winsize, lastn = T)
-  a <- mean((modelA$f - ts[beg:end])^2)
-  b <- mean((modelB$f - ts[beg:end])^2)
-  #print(end)
-  end = end - trainingsize
-  ASE_A[x] = a
-  ASE_B[x] = b
-}
-
-ASE_A
-summary(ASE_A)
-hist(ASE_A)
-
-ASE_B
-summary(ASE_B)
-hist(ASE_B)
 
 
 ```
@@ -383,10 +398,13 @@ eval_model(us$positivity,preds$mean,'NNFOR 90-Day Forecast', 0) #ASE = .00085
 
 rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30, model_name){
   ASE = c()
+  comp_df <- df %>% dplyr::select(date, positivity)
+  comp_df$preds = NA
+  names(comp_df) = c('date','Actual','Predicted')
   test_stop <- length(df$positivity)
   plot_list <- list()
   loop_end <- floor(test_stop/(training_size+horizon))
-
+  
   for (x in 1:loop_end){
     test_start <- test_stop - horizon + 1
     train_start <- test_start - training_size 
@@ -404,6 +422,7 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
                             limits = F)
     a <- mean((preds$f - df$positivity[test_start:test_stop])^2)
     ASE[x] = a
+    comp_df$Predicted[test_start:test_stop] = preds$f
     print(a)
     plot(
       eval_model(
@@ -417,10 +436,18 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
       )
     test_stop = test_stop - training_size
     
-    
-
   }
   hist(ASE)
+  plot(gather(comp_df, key = Type, value = 'Positivity_Rate', -date) %>% 
+         ggplot(aes(date, Positivity_Rate, color=Type)) + geom_line() +
+         labs(
+           title=paste(model_name, 'Performance Evaluation'),
+           subtitle=paste0(horizon,'-Day Forecast Rolling Window'), 
+           x='Day', 
+           y='Positivity Rate',
+           caption=paste0('Mean ASE: ',round(mean(ASE),6))
+         )
+       ) 
   return(summary(ASE))
 }
 
