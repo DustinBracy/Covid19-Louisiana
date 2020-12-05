@@ -1,8 +1,10 @@
 ---
 title: "COVID-19 in Louisiana - A Time Series Analysis"
 author: "Dustin Bracy"
-date: "11/19/2020"
-output: html_document
+date: "12/5/2020"
+output: 
+  html_document:
+    code_folding: hide
 editor_options: 
   chunk_output_type: console
 ---
@@ -19,36 +21,82 @@ library(gridExtra)
 library(vars)
 library(nnfor)
 
-# Get US Data & reverse order
+```
+
+# Introduction
+
+My name is Dustin Bracy, and this is a time series analysis of COVID-19 data in Louisiana and the United States spanning an 8 month period from the declaration of the pandemic on March 11, 2020 through November 11, 2020.  Below I will explore the difference between new daily positive cases and positivity rates, and why one may be more advantageous.  Next I'll walk through univiariate and multivariate analyses of both Louisiana and national numbers.  Finally I'll wrap up with a comparison of model performance for each use case.
+
+# Metrics used for reporting
+
+*Positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
+
+The idea behind this test is that a high positivity score should give leaders indication that either infection is increasing at an unusual rate, or not enough tests are available.  The World Health Organization has recommended nations adopt a rule of thumb to keep populations under approximately 5% positivity rate before considering re-opening or relaxing social restrictions.
+
+The positivity rate improves upon strictly measuring the total number of cases or positive results by better accounting for new tests. As time goes on, more individuals will be re-tested, including high risk individuals such as health care workers, who may receive tests and positive results more frequently than others.  The positivity rate accounts for this by measuring the total number of positive cases against tests, which will show less bias than strictly reporting on positive cases, which can be inflated by duplicate tests and non-unique cases.  A better way to control this bias is to measure the people testing positive over the people who have been tested, although this data is much more difficult to collect, due to HIPAA and privacy concerns with linking data to individuals.
+
+*Sources*
+https://www.jhsph.edu/covid-19/articles/covid-19-testing-understanding-the-percent-positive.html
+https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-positivity-rate-really-mean
+
+
+# Acquire and Load the Data
+
+The COVID-19 data used here comes from two primary sources: the [Louisiana Department of Health Coronavirus](https://ldh.la.gov/Coronavirus/) website, and  [The Covid Tracking Project](https://covidtracking.com/) website.  Additional temperature, windspeed and other related data for Louisiana was collected manually from historical data for the MSY (New Orleans regional airport) section of  [Weather Underground](https://www.wunderground.com/history/monthly/us/la/kenner/KMSY/date/2020-11).  
+
+The data comes in pretty good shape, with only a handful of missing values in the US dataset.  Fortunately, there are no missing values in response variables of interest (i.e. the total number of daily tests and the number of daily positive cases).
+
+The data ingestion pipeline is fairly simple: download the data directly from the api or website, remove data outside of the March 11 to November 11 window, and add positivity metrics. 
+
+```{r get_Data}
+
+# Get latest US Data & sort by date ascending
+download.file('https://covidtracking.com/data/download/national-history.csv',
+              destfile = './data/national-history.csv')
+
 us <- read_csv('./data/national-history.csv')
 us <- us[order(us$date),]
 
-# Get LA Data & consolidate to state level
-ladata <- readxl::read_xlsx('./data/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx')
-la <- ladata %>%
+
+# Get latest LA Data & consolidate to state level
+download.file('https://ldh.la.gov/assets/oph/Coronavirus/data/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx',
+              destfile = './data/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx')
+
+la <- readxl::read_xlsx('./data/LA_COVID_TESTBYDAY_PARISH_PUBLICUSE.xlsx')
+la <- la %>%
   group_by(date = `Lab Collection Date`) %>%
   summarise(
     tests = sum(`Daily Test Count`),
     positive = sum(`Daily Positive Test Count`),
     negative = sum(`Daily Negative Test Count`),
     cases = sum(`Daily Case Count`)
-)
+  )
 
-# Create Positivity features
+
+# Create positivity features
 la$positivity = la$positive / la$tests
 us$positivity <- us$positiveIncrease / us$totalTestResultsIncrease
 
+
 # Get temp data from WeatherUnderground.com (historical data for MSY)
-## Note Nov8 data missing from site, so imputed average of Nov7+9 was taken
+## Note Nov8 data missing from site, so the imputed average of Nov7+9 was taken
 xdf <- read_csv('./data/temp.csv')
 xdf$GatheringBinary <- as.numeric(ifelse(is.na(xdf$Gathering), 0,1))
 
-# Start on March 11, end on Nov 11
+# Trim all datasets to span March 11, 2020 through Nov 11, 2020
 la <- la[11:256,]
-us <- tail(us, 256)
-us <- head(us, 246)
+us <- us[50:295,]
 xdf <- xdf[11:256,]
 
+# Check for missing values
+la %>% is.na() %>% summary()
+us %>% is.na() %>% summary()
+xdf %>% dplyr::select(!Gathering) %>% is.na() %>% summary()
+
+```
+
+
+```{r eval_model_function}
 
 eval_model <- function(response, predictions, pred_ul = NA, pred_ll = NA, model_name, AIC_val = 0, ending_point = length(response)) {
   num_predictions = length(predictions)
@@ -115,22 +163,7 @@ eval_model(us$positivity, preds$f, preds$ul, preds$ll, model_name = 'ARIMA(12,1,
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
 eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARIMA(12,1,2)', e$aic) 
 
-
 ```
-
-# Introduction
-My name is Dustin Bracy, and this is a time series analysis of COVID-19 data in Louisiana and the United States spanning an 8 month period from the declaration of the pandemic on March 11, 2020 through November 11, 2020.  We will explore the difference between new daily positive cases and positivity rates, and why one may be more advantageous.  Next we'll walk through univiariate and multivariate analyses of both Louisiana and national numbers.  Finally we'll wrap up with a comparison of model performance for each use case.
-
-## Metrics used for reporting
-*Positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
-
-The idea behind this test is that a high positivity score should give leaders indication that either infection is increasing at an unusual rate, or not enough tests are available.  The World Health Organization has recommended nations adopt a rule of thumb to keep populations under approximately 5% positivity rate before considering re-opening or relaxing social restrictions.
-
-The positivity rate improves upon strictly measuring the total number of cases or positive results by better accounting for new tests. As time goes on, more individuals will be re-tested, including high risk individuals such as health care workers, who may receive tests and positive results more frequently than others.  The positivity rate accounts for this by measuring the total number of positive cases against tests, which will show less bias than strictly reporting on positive cases, which can be inflated by duplicate tests and non-unique cases.  A better way to control this bias is to measure the people testing positive over the people who have been tested, although this data is much more difficult to collect, due to HIPAA and privacy concerns with linking data to individuals.
-
-## Sources used
-https://www.jhsph.edu/covid-19/articles/covid-19-testing-understanding-the-percent-positive.html
-https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-positivity-rate-really-mean
 
 
 ```{r PositivityComparison}
@@ -451,7 +484,7 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
   return(summary(ASE))
 }
 
-########## ARIMA(12,1,2) ########## 
+########## example: ARIMA(12,1,2) ########## 
 e <- est.arma.wge(us.d1, p=12, q=2)
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
@@ -494,7 +527,7 @@ sqrt(fit$wnv)
 wnv = 1/(8-2) * sum(fit$resid[3:8]^2)
 ```
 
-```{r}
+```{r multivariate_Louisiana}
 
 la_XDF <- data.frame(
   temp = ts(xdf$AvgTempF),
@@ -513,10 +546,34 @@ plot(preds)
 eval_model(la$positivity, preds$mean,preds$mean,preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .00085
 
 ## 90 day forecast
-preds <- forecast(x, h=90, xreg=xdf2)
+preds <- forecast(x, h=90, xreg=la_XDF)
 plot(preds)
 eval_model(la$positivity, preds$mean,preds$mean,preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .00085
 
 
 ```
 
+```{r multivariate_US}
+
+us_XDF <- data.frame(
+  gathering <- ts(xdf$GatheringBinary)
+)
+
+ts_us <- ts(us$positivity[1:239], start = '1')
+
+x = mlp(ts_us, lags = 7, hd.auto.type = 'cv', reps=100, xreg = us_XDF)
+plot(x)
+preds <- predict(x, 7)
+plot(preds)
+eval_model(us$positivity,preds$mean,model_name='NNFOR', AIC_val =  0) #ASE = 
+
+
+ts_us <- ts(us$positivity[1:156], start = '1')
+x = mlp(ts_us, hd.auto.type = 'cv', reps=100, lags =  7, xreg = us_XDF)
+plot(x)
+preds <- predict(x, 90)
+plot(preds)
+eval_model(us$positivity,preds$mean, model_name='NNFOR', AIC_val =  0) #ASE = 
+
+
+```
