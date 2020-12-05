@@ -20,25 +20,13 @@ library(RColorBrewer)
 library(gridExtra)
 library(vars)
 library(nnfor)
+#theme_set(theme_fivethirtyeight())
 
 ```
 
 # Introduction
 
 My name is Dustin Bracy, and this is a time series analysis of COVID-19 data in Louisiana and the United States spanning an 8 month period from the declaration of the pandemic on March 11, 2020 through November 11, 2020.  Below I will explore the difference between new daily positive cases and positivity rates, and why one may be more advantageous.  Next I'll walk through univiariate and multivariate analyses of both Louisiana and national numbers.  Finally I'll wrap up with a comparison of model performance for each use case.
-
-# Metrics used for reporting
-
-*Positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
-
-The idea behind this test is that a high positivity score should give leaders indication that either infection is increasing at an unusual rate, or not enough tests are available.  The World Health Organization has recommended nations adopt a rule of thumb to keep populations under approximately 5% positivity rate before considering re-opening or relaxing social restrictions.
-
-The positivity rate improves upon strictly measuring the total number of cases or positive results by better accounting for new tests. As time goes on, more individuals will be re-tested, including high risk individuals such as health care workers, who may receive tests and positive results more frequently than others.  The positivity rate accounts for this by measuring the total number of positive cases against tests, which will show less bias than strictly reporting on positive cases, which can be inflated by duplicate tests and non-unique cases.  A better way to control this bias is to measure the people testing positive over the people who have been tested, although this data is much more difficult to collect, due to HIPAA and privacy concerns with linking data to individuals.
-
-*Sources*
-https://www.jhsph.edu/covid-19/articles/covid-19-testing-understanding-the-percent-positive.html
-https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-positivity-rate-really-mean
-
 
 # Acquire and Load the Data
 
@@ -95,6 +83,59 @@ xdf %>% dplyr::select(!Gathering) %>% is.na() %>% summary()
 
 ```
 
+# Comparing Positivity Rate vs New Positive Cases
+
+*Positivity rate* - According to John Hopkins University, the positivity rate is a new measure developed to identify either trending increases in transmission rates, or overall drops in testing rates, which can indicate a shortage of tests.  It measures the ratio of diagnostic tests which are actually positive (i.e. # of positive tests / # of total tests). 
+
+The idea behind this test is that a high positivity score should give leaders indication that either infection is increasing at an unusual rate, or not enough tests are available.  The World Health Organization has recommended nations adopt a rule of thumb to keep populations under approximately 5% positivity rate before considering re-opening or relaxing social restrictions.
+
+The positivity rate improves upon strictly measuring the total number of cases or positive results by better accounting for new tests. As time goes on, more individuals will be re-tested, including high risk individuals such as health care workers, who may receive tests and positive results more frequently than others.  The positivity rate accounts for this by measuring the total number of positive cases against tests, which will show less bias than strictly reporting on positive cases, which can be inflated by duplicate tests and non-unique cases.  A better way to control this bias is to measure the people testing positive over the people who have been tested, although this data is much more difficult to collect, due to HIPAA and privacy concerns with linking data to individuals.
+
+*Sources*
+https://www.jhsph.edu/covid-19/articles/covid-19-testing-understanding-the-percent-positive.html
+https://www.mprnews.org/story/2020/08/12/behind-the-numbers-what-does-a-covid19-positivity-rate-really-mean
+
+Below is a plot that shows the differences between new positive cases vs the positivity rate.  You can start to see the explosive nature of the positive case metric.  I determined the ratio of Louisiana's population compared to the US population by using census.gov population values from Jul 1, 2019.
+
+```{r PositivityComparison}
+#census.gov reported populations on Jul 1, 2019: Louisiana / USA
+lapopratio <- 4648794 / 328239523
+
+positivity_df <- data.frame(cbind(la[c('date', 'positivity')],  us['positivity']))
+names(positivity_df) = c('date','LA','US')
+
+positive_df <- data.frame(cbind(la[c('date', 'positive')],  us['positiveIncrease']))
+names(positive_df) = c('date','LA','US')
+positive_df$US = positive_df$US * lapopratio
+
+
+grid.arrange(
+  gather(positivity_df, key = Region, value = 'Positivity Rate', -date) %>% 
+    ggplot(aes(date, `Positivity Rate`)) + 
+    geom_line(aes(color=Region), size=1) + 
+    labs(title='Louisiana vs US Positivity Rate', 
+         x = 'Date', 
+         y='Positivity Rate') +
+    theme_fivethirtyeight(), 
+
+  gather(positive_df, key = Region, value = 'Positive Tests', -date) %>% 
+    ggplot(aes(date, `Positive Tests`)) + 
+    geom_line(aes(color=Region), size=1) + 
+    labs(title='Louisiana vs US Daily New Positive Tests', 
+         x = 'Date', 
+         y='Positive Tests', 
+         subtitle = '*US numbers scaled to 1.42% based on LA population density'),
+  ncol = 2)
+
+```
+
+# Evaluation Methods
+
+To compare the prediction performance of our models to reality, we want to train a model and hold back a test set of a given period of days that I'll call a  *horizon*.  We will sum the squared difference between each predicted value and actual value, and then take the average to generate the Average Squared Error (ASE).  This metric will be the base comparison for all models, and generally the model with the lowest ASE score is the best performing model.
+
+## Helper functions
+
+To help score the models, I have written a couple of helper functions.  A takes a fitted model, predictions and the desired horizon, and it generates plots of actual, predicted and confidence intervals and the ASE for the given model.
 
 ```{r eval_model_function}
 
@@ -148,71 +189,153 @@ eval_model <- function(response, predictions, pred_ul = NA, pred_ll = NA, model_
     comparison_plot = comparison_plot + 
       geom_line(aes(ll$Day + ending_point - num_predictions, ll$pred_ll), 
                 color='grey70', linetype = "dashed") 
-    }
-  #print(ggplot_build(comparison_plot)$data)
+  }
+  
   return(comparison_plot)
 }
 
+```
 
+```{r eval_model_example, eval=FALSE}
+########## example: ARIMA(12,2) ########## 
+e <- est.arma.wge(us$positivity, p=12, q=2)
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta,  n.ahead = 7, lastn = T, limits = F)
+eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARMA(12,2)', e$aic) 
 
-#example:
-e <- est.arma.wge(us.d1, p=12, q=2)
-preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity, preds$f, preds$ul, preds$ll, model_name = 'ARIMA(12,1,2)', AIC_val = e$aic) #ASE = .000156
-
-preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARIMA(12,1,2)', e$aic) 
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta,  n.ahead = 90, lastn = T, limits = F)
+eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARMA(12,2)', e$aic) 
 
 ```
 
+Another function calculates the rolling ASE, which is a measure of the ASE across several windows in time, for a fitted model. This function uses the evaluation function to plot each window and capture score, and then stores them in a list.  This list is then averaged to find the average ASE across several time periods.  By default I use a month of training data to evaluate a seven day period.  The function finally returns a plot of all windows and actual values to visualize performance across the range of data.
 
-```{r PositivityComparison}
+```{r Rolling_ASE_function}
 
-#census.gov reported populations on Jul 1, 2019: Louisiana / USA
-lapopratio <- 4648794 / 328239523
+rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30, model_name, model_type = 'ARUMA', maxP){
+  ASE = list(ASE = c(), plots = c(), multiplot = NA)
+  ASE_holder = c()
+  comp_df <- df %>% dplyr::select(date, positivity)
+  comp_df$preds = NA
+  names(comp_df) = c('date','Actual','Predicted')
+  test_stop <- length(df$positivity)
+  loop_end <- floor(test_stop/(training_size+horizon))
+  
+  for (x in 1:loop_end){
+    test_start <- test_stop - horizon + 1
+    train_start <- test_start - training_size 
+    train_stop <- test_start - 1
+    print(paste0('test window: ',test_start,':',test_stop,
+                 ', train window: ',train_start,':',train_stop))
+    data_window <- df$positivity[train_start:train_stop]
+    
+    if(model_type == 'ARUMA') {
+      preds <- fore.aruma.wge(data_window, 
+                              phi=fitted_model$phi, 
+                              theta=fitted_model$theta, 
+                              s=s, 
+                              d=d, 
+                              n.ahead = horizon, 
+                              lastn = F, 
+                              limits = F)
+      pred_object <- preds$f
+    }
+    if(model_type == 'SigPlusNoise') {
+      preds <- fore.sigplusnoise.wge(data_window, max.p = maxP, n.ahead = horizon, limits=F)
+      pred_object <- preds$f
+    }
+    
+    if(model_type == 'NNFOR') {
+      ts_la <- ts(data_window, start = '1')
+      mlp_model = mlp(ts_la, lags = horizon, hd.auto.type = 'cv', reps=100)
+      preds <- predict(mlp_model, horizon)
+      preds$ul <- NA
+      preds$ll <- NA
+      pred_object <- as.numeric(preds$mean)
+    }
+    a <- mean((pred_object - df$positivity[test_start:test_stop])^2)
+    print(a)
+    print(class(a))
+    print(pred_object)
+    #ASE_holder[x] <- a
+    ASE$ASE[x] <- a
+    comp_df$Predicted[test_start:test_stop] = pred_object
 
-positivity_df <- data.frame(cbind(la[c('date', 'positivity')],  us['positivity']))
-names(positivity_df) = c('date','LA','US')
-
-positive_df <- data.frame(cbind(la[c('date', 'positive')],  us['positiveIncrease']))
-names(positive_df) = c('date','LA','US')
-positive_df$US = positive_df$US * lapopratio
-
-
-grid.arrange(
-  gather(positivity_df, key = Region, value = 'Positivity Rate', -date) %>% 
-    ggplot(aes(date, `Positivity Rate`)) + 
-    geom_line(aes(color=Region), size=1) + 
-    labs(title='Louisiana vs US Positivity Rate', 
-         x = 'Date', 
-         y='Positivity Rate') +
-    theme_fivethirtyeight(), 
-
-  gather(positive_df, key = Region, value = 'Positive Tests', -date) %>% 
-    ggplot(aes(date, `Positive Tests`)) + 
-    geom_line(aes(color=Region), size=1) + 
-    labs(title='Louisiana vs US Daily New Positive Tests', 
-         x = 'Date', 
-         y='Positive Tests', 
-         subtitle = '*US numbers scaled to 1.42% based on LA population density') + 
-    theme_fivethirtyeight(),
-  ncol = 2)
+    ASE$plots[x] <-
+      plot(eval_model(
+        data_window,
+        pred_object, 
+        model_name = model_name, 
+        AIC_val = fitted_model$aic, 
+        pred_ul = preds$ul, 
+        pred_ll = preds$ll,
+        ending_point = test_stop))
+    test_stop = test_stop - training_size
+    
+  }
+  
+  ASE$multiplot <- plot(gather(comp_df, key = Type, value = 'Positivity_Rate', -date) %>% 
+         ggplot(aes(date, Positivity_Rate, color=Type)) + geom_line() +
+         labs(
+           title=paste(model_name, 'Performance Evaluation'),
+           subtitle=paste0(horizon,'-Day Forecast Rolling Window'), 
+           x='Day', 
+           y='Positivity Rate',
+           caption=paste0('Mean ASE: ',round(mean(ASE$ASE),6))
+           #caption=paste0('Mean ASE: ',round(mean(ASE_holder),6))
+         )
+       ) 
+  return(ASE)
+}
 
 ```
 
+```{r Rolling_ASE_example, eval=FALSE}
+########## example: ARIMA(12,2) ########## 
+e <- est.arma.wge(us$positivity, p=12, q=2)
+test <- rolling_ASE(us, e, s=12, d=1, horizon=7, model_name = 'ARMA(12,2)')
 
-```{r Louisiana}
-## TODO Jung Box Test
-## TODO Compare ACF/Spectral Densities
+```
 
+# Univariate Analysis
+
+The steps for building and evaluating our models will proceed as follows:
+- Plot and examine the data
+  - Realization
+  - Spectral Density
+  - Autocorrelation Function
+- Evaluate stationarity assumptions. There are three stationary conditions:
+  - Mean does not depend on time
+  - Variance is finite and does not depend on time
+  - Correlation only depends on how far apart observations are in time, not where they are
+- Build models
+  - Check that serial correlation has been removed (AIC scores, ACF, PACF plots)
+  - Check residuals for white noise
+- Evaluate model forecast performance
+
+## Louisiana
+
+### Plot the Data:
+
+```{r LA_plots}
+# Plot the data
 plotts.sample.wge(la$positivity)
-
-plotts.wge(la$positivity)
-
+# Look deeper at spectral density
 parzen.wge(la$positivity, trun=100)
+```
 
-aic5.wge(la$positivity, p = 0:12, q=0:5, type='bic')
+There is strong evidence of serial correlation in this data as can be seen in the peaks in the spectral density plots and the slowly damping, sinusoidal behavior in the autocorrelation function plots.  There is significant evidence of a weekly trend, as can be seen in the Parzen Window (spectral density plot).  The frequency peak at .14 indicates a weekly trend (1/7 = .143), with potentially an echo at .28.  Increasing the truncation point of the Parzen function helps highlight some additional points that suggest possibly a monthly factor as well.  
 
+### Evaluate Stationarity:
+There are several indications that suggest the data is NOT stationary, the most obvious being the strong weekly trend with strong peaks each weekend, which effectively increases the mean on weekends.  There is a difference in variance which can be seen in the early weeks of the pandemic that have tapered off as time progresses. 
+
+### Model Construction:
+I start by differencing the data, which filters long-term trending behavior and leaves cyclical patterns. Differencing once leaves a good bit of cyclical pattern in the ACF, especially at lag 7.
+
+#### Identify correlation structures:
+Here we are going to look at different filters to try to model out some of the correlation in the data.  We'll also look at a factor table to see if we can identify a weekly or monthly trend.
+
+The overfit table shows strong evidence of 1-B, 1+.445B+B^2, 1-1.247B+B^2 and 1+.802B+B^2 being present in the model.  This is more than enough evidence to proceed with the weekly seasonal model.  
+```{r Louisiana_correlation}
 # Take out 1-B
 la.d1 <- artrans.wge(la$positivity,1)
 
@@ -222,116 +345,122 @@ artrans.wge(la.d1,1)
 # strong evidence of a 7 day cycle + possibly a monthly cycle
 la.s7 <- artrans.wge(la$positivity, c(rep(0,6),1))
 
-# Take out a 1-B + the (1-B)^7.. looks like white noise
-la.d1.s7 <- artrans.wge(la.d1, c(rep(0,6),1))
-la.d1.s7.s12 <- artrans.wge(la.d1, c(rep(0,6),1,0,0,0,0,1))
+# Add (1-B) + s7
+la.d1.s7 <- artrans.wge(la.s7,1)
 
-parzen.wge(la.d1.s7, trun=100)
-parzen.wge(la.s7, trun=100)
+# Try to model weekly + monthly data
+la.s7.s12 <- artrans.wge(la$positivity, c(rep(0,6),1,0,0,0,0,1))
 
-la.s7.s12 <- artrans.wge(la$positive, c(rep(0,6),1,0,0,0,0,1,0,1))
-pacf(la.s7)
-acf(la.s7)
+# Overfit table
+est.ar.wge(la$positivity, p=15)
 
-parzen.wge(la.s7.s12, trun=100)
-aic5.wge(la.s7.s12, type = 'bic', p=0:15,q=0:2) #12/2, 8/1, 3/2
+# Generate a factor table for a (1-B^7)
+tswge::factor.wge(c(rep(0,6),1))
 
+```
 
-e <- est.arma.wge(la.s7.s12,p = 12, q=2)
-# looks like white noise
-plotts.wge(e$res)
-ljung.wge(e$res, p=12,q=2, K=24)
-ljung.wge(e$res, p=12,q=2, K=48)
+#### Estimate parameters and check residuals:
 
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'ARMA(12,2) With Weekly/Monthly Trend', e$aic) #ASE .000192
+TSWGE offers an aic5 function that iterates through values of P (phi) and Q (theta), fits a model, and returns the top 5 performing models by either AIC or BIC value.  The AIC and BIC penalize models for the number of parameters used, with BIC favoring simpler models even more so than AIC.  This gives us a pretty good idea of the best fitting model as a starting point.
 
+The ACF and PACF plots look like white noise, as expected.  The Ljung-Box test fails to reject the null hyphothesis that the residuals are white noise.  The generated spectral densities look like they have a fairly good fit, the final peak is overpronounced in our generations compared to the actual data.  The ACF comparisons are all over the board, but with peaks in the same general spots (lags at 7, 14, 21).  The generated realizations look quite a bit different, but the spectral densities and ACF plots look fairly similar, indicating this could be a useful model.
 
-e <- est.arma.wge(la.s7.s12,p = 8, q=1)
-plotts.wge(e$res)
-ljung.wge(e$res, p=8,q=1, K=24)
-ljung.wge(e$res, p=8,q=1, K=48)
+```{r Louisiana_estimate_weekly}
+# Estimate the model params
+aic5.wge(la.s7, type = 'bic', p=0:20,q=0:2) #15
+e <- est.arma.wge(la.s7, p=15, q=0)
 
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'ARMA(8,1) With Weekly/Monthly Trend', e$aic) #ASE .000196
+# Ljung Box Test shows white noise residuals
+ljung.wge(artrans.wge(la.s7, phi.tr = e$phi))
+ljung.wge(artrans.wge(la.s7, phi.tr = e$phi), K = 48)
+acf(e$res)
+pacf(e$res)
 
-e <- est.arma.wge(la.s7.s12,p = 3, q=2)
-plotts.wge(e$res)
-ljung.wge(e$res, p=3,q=2, K=24)
-ljung.wge(e$res, p=3,q=2, K=48)
+#Compare Spectral Densities
+sims = 5
+SpecDen = parzen.wge(la$positivity, plot = "FALSE")
+plot(SpecDen$freq, SpecDen$pzgram, type = "l", lwd = 6)
 
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000222
-
-####
-
-e <- est.arma.wge(la.s7.s12,p = 12, q=2)
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000609
-
-e <- est.arma.wge(la.s7.s12,p = 8, q=1)
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000509
-
-e <- est.arma.wge(la.s7.s12,p = 3, q=2)
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'ARMA(3,2) With Weekly/Monthly Trend', e$aic) #ASE .000289
+for( i in 1: sims)
+{
+   SpecDen2 = parzen.wge(gen.aruma.wge(246,s = 7, phi = e$phi, plot ="FALSE"), plot = "FALSE")
+   lines(SpecDen2$freq,SpecDen2$pzgram, lwd = 2, col = "red")
+}
 
 
+#Compare ACFs
+sims = 5
+ACF = acf(la$positivity, plot = "FALSE")
+plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
 
-# 1-B + s7
-aic5.wge(la.d1.s7, p=0:15, q=0:5, type='bic') #BIC recommends 12/2>12/1>8/1>7/1>9/1
+for( i in 1: sims)
+{
+   ACF2 = acf(gen.aruma.wge(246, s = 7, phi = e$phi, plot = "FALSE"), plot = "FALSE")
+   lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
+}
 
-aic5.wge(la.d1.s7.s12, p=0:15)
+#Compare Generated Realizations 
+eGen = gen.aruma.wge(246, s = 7, phi = e$phi, vara = e$avar)
+plotts.sample.wge(eGen)
+plotts.sample.wge(la$positivity)
 
 
-e <- est.arma.wge(la.d1.s7,p = 12, q=2)
-ljung.wge(e$res, p=12,q=2, K=24)
-ljung.wge(e$res, p=12,q=2, K=48)
-plotts.wge(e$res)
+# Check performance
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000647
 
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
+eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000202
+
+rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'AR(15) with Weekly Trend') #ASE .000277
+
+```
+
+#### Fitting additional models:
+
+##### Weekly ARUMA(14,1,0)
+ARUMA(14,1,0) with a weekly trend shows a slight improvement in the 7 day prediction, but a very poor performance in the 90 day trend.  This is due to the 1-B term induced by the difference, that causes the trend to continue in a downward trend seen in the training data.
+
+```{r Louisiana_estimate_weekly_difference}
+aic5.wge(la.d1.s7, p=0:15, q=0:2, type='bic') #BIC recommends 14,0
+e <- est.arma.wge(la.d1.s7,p = 14, q=0)
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .000465
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,
+           'ARIMA(14,1,0) With Weekly Trend', e$aic) #ASE = .000541
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2) With Weekly Trend', e$aic) #ASE = .016857
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,
+           'ARIMA(14,1,0) With Weekly Trend', e$aic) #ASE = .014017  (BAD)
 
-e <- est.arma.wge(la.d1.s7.s12,p = 12, q=2)
-ljung.wge(e$res, p=12,q=2, K=24)
-ljung.wge(e$res, p=12,q=2, K=48)
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=12, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, preds$ul, preds$ll,7,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .002049
+rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'ARIMA(14,1,0) with Weekly Trend') #ASE .000679
 
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=0, s=12, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, preds$ul, preds$ll,'ARIMA(12,1,2) With Weekly + Monthly Trends', e$aic) #ASE = .001054
+```
 
+##### Signal Plus Noise
+The signal plus noise model performs very well in the 7 day window, but very poorly over the 90 day window. This is a deterministic signal with a stationary mean model, and our results aren't surprising since it doesn't account for the weekly trend well. 
+
+```{r Louisiana_SigPlusNoise}
 ########## Sig Plus Noise ########## 
-preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 7, limits=F)
-eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .000255
+preds <- fore.sigplusnoise.wge(la$positivity, max.p = 15, n.ahead = 7, limits=F)
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .000385
 
-preds <- fore.sigplusnoise.wge(la$positivity, max.p = 7, n.ahead = 90, limits=F)
-eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .002345 (BAD)
+preds <- fore.sigplusnoise.wge(la$positivity, max.p = 15, n.ahead = 90, limits=F)
+eval_model(la$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .003437 (BAD)
 
+rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'SigPlusNoise', model_type = 'SigPlusNoise', maxP = 15) #ASE .000418
 
-# s7
-aic5.wge(la.d7, p=0:12, q=0:5, type='bic')
-e <- est.ar.wge(la.d7,p = 8)
-ljung.wge(e$res, p=8, K=24)
-ljung.wge(e$res, p=8, K=48)
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, preds$ul, preds$ll,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .002049
+```
 
-preds <- fore.aruma.wge(la$positivity, phi = e$phi, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, preds$ul, preds$ll,'AR(8) with Weekly Trend 7-Day Forecast', e$aic) #ASE = .001054
-
-
+##### Neural Network
+The neural network model performs fairly well, and picks up on the weekly trend, but regresses towards a mean, and is edged out by the AR(15) model from earlier.
+```{r Louisiana_NeuralNetwork}
 ts_la <- ts(la$positivity[1:239], start = '1')
-x = mlp(ts_la, lags = 7, hd.auto.type = 'cv', reps=100)
+x = mlp(ts_la, lags = 7, hd.auto.type = 'cv', reps=10)
 plot(x)
 preds <- predict(x, 7)
 plot(preds)
-eval_model(la$positivity,preds$mean,7,'NNFOR 7-Day Forecast', 0) #ASE = .000627
+eval_model(la$positivity,preds$mean,7,model_name = 'NNFOR', AIC_val = 0) #ASE = .000766
 
 
 ts_la <- ts(la$positivity[1:156], start = '1')
@@ -339,36 +468,113 @@ x = mlp(ts_la, lags = 7, m = 1, hd.auto.type = 'cv', reps=100)
 plot(x)
 preds <- predict(x, 90)
 plot(preds)
-eval_model(la$positivity,preds$mean,90,'NNFOR 90-Day Forecast', 0) #ASE = .00085
+eval_model(la$positivity,preds$mean,90,model_name = 'NNFOR', AIC_val = 0) #ASE = .000852
 
+rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'NNFOR', model_type = 'NNFOR') #ASE .000519
 
 ```
 
 
-```{r USA}
 
+## United States
+
+```{r US}
+
+# Plot the data
 plotts.sample.wge(us$positivity)
-parzen.wge(us$positivity, trunc=200)
 
+# Look deeper at spectral density
+parzen.wge(us$positivity, trun=100)
 
+# Difference the data once
 us.d1 <- artrans.wge(us$positivity,1)
-parzen.wge(us.d1)
 
-#us.s7 <- artrans.wge(us$positivity, c(rep(0,6),1))
-#us.d1.s7 <- artrans.wge(us.d1, c(rep(0,6),1))
+# Difference it again, no improvement
+artrans.wge(us.d1,1)
+
+# Try various seasonal models
+us.s7 <- artrans.wge(us$positivity, c(rep(0,6),1))
 us.s12 <- artrans.wge(us$positivity, c(rep(0,11),1))
 us.d1.s12 <- artrans.wge(us.s12,1)
+us.d1.s7 <- artrans.wge(us.d1, c(rep(0,6),1))
+us.d1.s12 <- artrans.wge(us.d1, c(rep(0,11),1))
 
-aic5.wge(us.d1, p=0:12, q=0:5, type='bic') # BIC says 1,1 AIC says 12,2
+aic5.wge(us.d1, p=0:12, q=0:2, type='aic') # BIC says 1,1 AIC says 12,2
 #aic5.wge(us.s7, p=0:12, q=0:5, type='bic')
-#aic5.wge(us.d1.s12, p=0:12, q=0:5, type='bic')
+aic5.wge(us.d1.s12, p=0:12, q=0:2, type='bic')
 #plotts.sample.wge(us$positiveIncrease)
+
+aic5.wge(us$positivity, p=0:12, q=0:2)
+
+#e <- est.arma.wge(us.d1, p=1, q=1)
+
+e <- est.arma.wge(us$positivity, p=11, q=1)
+
+
+# Ljung Box Test does not show white noise residuals
+ljung.wge(artrans.wge(us.d1, phi.tr = e$phi))
+ljung.wge(artrans.wge(us.d1, phi.tr = e$phi), K = 48)
+acf(e$res)
+pacf(e$res)
+
+ljung.wge(e$res)
+ljung.wge(e$res, K = 48)
+acf(e$res)
+pacf(e$res)
+
+
+#Compare Spectral Densities
+sims = 5
+SpecDen = parzen.wge(us$positivity, plot = "FALSE")
+plot(SpecDen$freq, SpecDen$pzgram, type = "l", lwd = 6)
+
+for( i in 1: sims)
+{
+   SpecDen2 = parzen.wge(gen.aruma.wge(246,s = 12, phi = e$phi, plot ="FALSE"), plot = "FALSE")
+   lines(SpecDen2$freq,SpecDen2$pzgram, lwd = 2, col = "red")
+}
+
+
+#Compare ACFs
+sims = 5
+ACF = acf(us$positivity, plot = "FALSE")
+plot(ACF$lag ,ACF$acf , type = "l", lwd = 6)
+
+for( i in 1: sims)
+{
+   ACF2 = acf(gen.aruma.wge(246, s = 12, phi = e$phi, plot = "FALSE"), plot = "FALSE")
+   lines(ACF2$lag ,ACF2$acf, lwd = 2, col = "red")
+}
+
+#Compare Generated Realizations 
+eGen = gen.aruma.wge(246, s = 0, phi = e$phi, vara = e$avar)
+plotts.sample.wge(eGen)
+plotts.sample.wge(us$positivity)
+
+
+# Check performance
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, n.ahead = 7, lastn = T, limits = F)
+eval_model(us$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000647
+
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, n.ahead = 90, lastn = T, limits = F)
+eval_model(us$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000202
+
+rolling <- rolling_ASE(us, e, s=7, horizon=7, model_name = 'AR(15) with Weekly Trend') #ASE .000277
+
+
+
+
+
+
+
 
 #Some evidence of a 12 month seasonal trend
 est.ar.wge(us.d1, p=12)
 
 
 e <- est.arma.wge(us.d1, p=1, q=1)
+
+
 ljung.wge(e$res, p=1,q=1, K=48)
 
 #e <- est.arma.wge(us.s7, p=12, q=2)
@@ -425,107 +631,8 @@ eval_model(us$positivity,preds$mean,'NNFOR 90-Day Forecast', 0) #ASE = .00085
 
 ```
 
-
-
-```{r Rolling_ASE_function}
-
-rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30, model_name){
-  ASE = c()
-  comp_df <- df %>% dplyr::select(date, positivity)
-  comp_df$preds = NA
-  names(comp_df) = c('date','Actual','Predicted')
-  test_stop <- length(df$positivity)
-  plot_list <- list()
-  loop_end <- floor(test_stop/(training_size+horizon))
-  
-  for (x in 1:loop_end){
-    test_start <- test_stop - horizon + 1
-    train_start <- test_start - training_size 
-    train_stop <- test_start - 1
-    print(paste0('test window: ',test_start,':',test_stop,
-                 ', train window: ',train_start,':',train_stop))
-    data_window <- df$positivity[train_start:train_stop]
-    preds <- fore.aruma.wge(data_window, 
-                            phi=fitted_model$phi, 
-                            theta=fitted_model$theta, 
-                            s=s, 
-                            d=d, 
-                            n.ahead = horizon, 
-                            lastn = F, 
-                            limits = F)
-    a <- mean((preds$f - df$positivity[test_start:test_stop])^2)
-    ASE[x] = a
-    comp_df$Predicted[test_start:test_stop] = preds$f
-    print(a)
-    plot(
-      eval_model(
-        data_window,
-        preds$f, 
-        model_name = model_name, 
-        AIC_val = fitted_model$aic, 
-        pred_ul = preds$ul, 
-        pred_ll = preds$ll,
-        ending_point = test_stop)
-      )
-    test_stop = test_stop - training_size
-    
-  }
-  hist(ASE)
-  plot(gather(comp_df, key = Type, value = 'Positivity_Rate', -date) %>% 
-         ggplot(aes(date, Positivity_Rate, color=Type)) + geom_line() +
-         labs(
-           title=paste(model_name, 'Performance Evaluation'),
-           subtitle=paste0(horizon,'-Day Forecast Rolling Window'), 
-           x='Day', 
-           y='Positivity Rate',
-           caption=paste0('Mean ASE: ',round(mean(ASE),6))
-         )
-       ) 
-  return(summary(ASE))
-}
-
-########## example: ARIMA(12,1,2) ########## 
-e <- est.arma.wge(us.d1, p=12, q=2)
-
-preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta, d=1, n.ahead = 7, lastn = T, limits = F)
-#eval_model(us$positivity,preds$f, preds$ul, preds$ll,7,'ARIMA(12,1,2)', e$aic) #ASE = .000156
-rolling_ASE(us, e, s=12, d=1, horizon=7, model_name = 'ARIMA(12,1,2)')
-
-#us.s12[(217-12):(239-12)]
-
-```
-
-```{r ConfidenceInterval}
-#Dr. Sadler's code for calculating confidence intervals:
-
-#(1-.9B)(1-.8B)Xt = at
-#(1-1.7B+.72B^2)Xt = at
-#Phi_1 = 1.7  Phi_2 = -.72
-
-s = c(5,8,9,8,7,6,4,3)
-
-#double check psi weights
-psi.weights.wge(phi = c(1.7, -.72), lag = 5)
-
-#AR(2)
-
-fit = fore.arma.wge(s,phi = c(1.7, -.72), n.ahead = 3)
-
-#forecasts for l = 1,2 and 3
-fit$f
-
-#Conf limits for l = 3
-# ll:   1.75415 - 1.96*sqrt(fit$wnv)*sqrt(1+1.7^2+ 2.17^2)
-# ul:   1.75415 + 1.96*sqrt(fit$wnv)*sqrt(1+1.7^2+ 2.17^2)
-fit$ll[3]
-fit$ul[3]
-
-#sigma_at_hat
-sqrt(fit$wnv)
-
-#Calc sigma_at_hat
-wnv = 1/(8-2) * sum(fit$resid[3:8]^2)
-```
+# Multivariate Analysis 
+## Louisiana
 
 ```{r multivariate_Louisiana}
 
@@ -553,6 +660,18 @@ eval_model(la$positivity, preds$mean,preds$mean,preds$mean, model_name = 'NNFOR'
 
 ```
 
+```{r Louisiana_VAR}
+
+VARselect(la$positivity, lag.max = 7, type = "const", season = 7, exogen = NULL) #AIC = 5.04
+#VARselect picks p=2 using AIC and p=1 using BIC
+vfit=VAR(la$positivity,p=2,type='const')
+preds=predict(vfit,n.ahead=7)
+preds
+
+```
+
+## United States
+
 ```{r multivariate_US}
 
 us_XDF <- data.frame(
@@ -577,3 +696,11 @@ eval_model(us$positivity,preds$mean, model_name='NNFOR', AIC_val =  0) #ASE =
 
 
 ```
+
+# Model Comparison
+
+```{r}
+
+```
+
+# Summary
