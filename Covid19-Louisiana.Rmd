@@ -211,9 +211,8 @@ Another function calculates the rolling ASE, which is a measure of the ASE acros
 
 ```{r Rolling_ASE_function}
 
-rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30, model_name, model_type = 'ARUMA', maxP){
+rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30, model_name, model_type = 'ARUMA', p, df_XDF=NA){
   ASE = list(ASE = c(), plots = c(), multiplot = NA)
-  ASE_holder = c()
   comp_df <- df %>% dplyr::select(date, positivity)
   comp_df$preds = NA
   names(comp_df) = c('date','Actual','Predicted')
@@ -240,23 +239,30 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
       pred_object <- preds$f
     }
     if(model_type == 'SigPlusNoise') {
-      preds <- fore.sigplusnoise.wge(data_window, max.p = maxP, n.ahead = horizon, limits=F)
+      preds <- fore.sigplusnoise.wge(data_window, max.p = p, n.ahead = horizon, limits=F)
       pred_object <- preds$f
     }
     
     if(model_type == 'NNFOR') {
       ts_la <- ts(data_window, start = '1')
-      mlp_model = mlp(ts_la, lags = horizon, hd.auto.type = 'cv', reps=100)
+      mlp_model = mlp(ts_la, lags = horizon, hd.auto.type = 'cv')
+      ?mlp
       preds <- predict(mlp_model, horizon)
       preds$ul <- NA
       preds$ll <- NA
       pred_object <- as.numeric(preds$mean)
     }
+    
+    if(model_type == 'VAR') {
+      vfit=VAR(cbind(Positivity = df$positivity, df_XDF)[train_start:train_stop,], p=p, type='both', season = s)
+      preds=predict(vfit,n.ahead=7)
+      pred_object <- preds$fcst$Positivity[,1]
+      preds$ul <- preds$fcst$Positivity[,3]
+      preds$ll <- preds$fcst$Positivity[,2]
+    }
+
     a <- mean((pred_object - df$positivity[test_start:test_stop])^2)
-    print(a)
-    print(class(a))
-    print(pred_object)
-    #ASE_holder[x] <- a
+    print(paste('Window ASE:', a))
     ASE$ASE[x] <- a
     comp_df$Predicted[test_start:test_stop] = pred_object
 
@@ -265,7 +271,7 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
         data_window,
         pred_object, 
         model_name = model_name, 
-        AIC_val = fitted_model$aic, 
+        AIC_val = ifelse(model_type == 'ARUMA', fitted_model$aic, 0), 
         pred_ul = preds$ul, 
         pred_ll = preds$ll,
         ending_point = test_stop))
@@ -281,7 +287,6 @@ rolling_ASE <- function (df, fitted_model, d=0, s=0, horizon=7, training_size=30
            x='Day', 
            y='Positivity Rate',
            caption=paste0('Mean ASE: ',round(mean(ASE$ASE),6))
-           #caption=paste0('Mean ASE: ',round(mean(ASE_holder),6))
          )
        ) 
   return(ASE)
@@ -365,7 +370,7 @@ TSWGE offers an aic5 function that iterates through values of P (phi) and Q (the
 
 The ACF and PACF plots look like white noise, as expected.  The Ljung-Box test fails to reject the null hyphothesis that the residuals are white noise.  The generated spectral densities look like they have a fairly good fit, the final peak is overpronounced in our generations compared to the actual data.  The ACF comparisons are all over the board, but with peaks in the same general spots (lags at 7, 14, 21).  The generated realizations look quite a bit different, but the spectral densities and ACF plots look fairly similar, indicating this could be a useful model.
 
-```{r Louisiana_estimate_weekly}
+```{r Louisiana_estimate_weekly, cache=TRUE}
 # Estimate the model params
 aic5.wge(la.s7, type = 'bic', p=0:20,q=0:2) #15
 e <- est.arma.wge(la.s7, p=15, q=0)
@@ -407,10 +412,10 @@ plotts.sample.wge(la$positivity)
 
 # Check performance
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000647
+eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly Trend', e$aic) #ASE .000647
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000202
+eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly Trend', e$aic) #ASE .000202
 
 rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'AR(15) with Weekly Trend') #ASE .000277
 
@@ -421,7 +426,7 @@ rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'AR(15) with Weekly T
 ##### Weekly ARUMA(14,1,0)
 ARUMA(14,1,0) with a weekly trend shows a slight improvement in the 7 day prediction, but a very poor performance in the 90 day trend.  This is due to the 1-B term induced by the difference, that causes the trend to continue in a downward trend seen in the training data.
 
-```{r Louisiana_estimate_weekly_difference}
+```{r Louisiana_estimate_weekly_difference, cache=TRUE}
 aic5.wge(la.d1.s7, p=0:15, q=0:2, type='bic') #BIC recommends 14,0
 e <- est.arma.wge(la.d1.s7,p = 14, q=0)
 
@@ -448,13 +453,13 @@ eval_model(la$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .
 preds <- fore.sigplusnoise.wge(la$positivity, max.p = 15, n.ahead = 90, limits=F)
 eval_model(la$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .003437 (BAD)
 
-rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'SigPlusNoise', model_type = 'SigPlusNoise', maxP = 15) #ASE .000418
+rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'SigPlusNoise', model_type = 'SigPlusNoise', p = 15) #ASE .000418
 
 ```
 
 ##### Neural Network
 The neural network model performs fairly well, and picks up on the weekly trend, but regresses towards a mean, and is edged out by the AR(15) model from earlier.
-```{r Louisiana_NeuralNetwork}
+```{r Louisiana_NeuralNetwork, cache=TRUE}
 ts_la <- ts(la$positivity[1:239], start = '1')
 x = mlp(ts_la, lags = 7, hd.auto.type = 'cv', reps=10)
 plot(x)
@@ -464,13 +469,13 @@ eval_model(la$positivity,preds$mean,7,model_name = 'NNFOR', AIC_val = 0) #ASE = 
 
 
 ts_la <- ts(la$positivity[1:156], start = '1')
-x = mlp(ts_la, lags = 7, m = 1, hd.auto.type = 'cv', reps=100)
+x = mlp(ts_la, lags = 7, m = 1, hd.auto.type = 'cv')
 plot(x)
 preds <- predict(x, 90)
 plot(preds)
 eval_model(la$positivity,preds$mean,90,model_name = 'NNFOR', AIC_val = 0) #ASE = .000852
 
-rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'NNFOR', model_type = 'NNFOR') #ASE .000519
+rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'NNFOR', model_type = 'NNFOR') #ASE .000637
 
 ```
 
@@ -524,7 +529,7 @@ tswge::factor.wge(c(rep(0,6),1))
 
 The ACF and PACF plots look like white noise, as expected.  The Ljung-Box test fails to reject the null hyphothesis that the residuals are white noise.  The generated spectral densities look like they have a fairly good fit, the final peak is overpronounced in our generations compared to the actual data.  The ACF comparisons are all over the board, but with peaks in the same general spots (lags at 7, 14, 21).  The generated realizations look quite a bit different, but the spectral densities and ACF plots look fairly similar, indicating this could be a useful model.
 
-```{r US_estimate}
+```{r US_estimate, cache=TRUE}
 # Estimate the model params
 aic5.wge(us$positivity, p=0:20, q=0:2, type='bic') # aic = 19,1 > 18,0 : bic = 1,1 > 9,1 > 2,1
 e <- est.arma.wge(us$positivity, p=9, q=1)
@@ -577,9 +582,9 @@ rolling <- rolling_ASE(us, e, s=0, horizon=7, model_name = 'AR(9,1)') #ASE .0000
 #### Fitting additional models:
 
 ##### ARMA(18,1) with a weekly trend
-The ARMA(18,1) with a weekly trend shows a slight improvement in the 7 day prediction, but a very poor performance in the 90 day trend.  This is due to the 1-B term induced by the difference, that causes the trend to continue in a downward trend seen in the training data.
+The ARMA(18,1) with a weekly trend shows a slight drop in performance in the 7 day prediction, but much better performance in the 90 day trend.  It is the most balanced model, having the best performance in 90 day predictions and competitive performance in the rolling window ASE.  
 
-```{r US_estimate_weekly_difference}
+```{r US_estimate_weekly, cache=TRUE}
 
 aic5.wge(us.s7, p=0:20, q=0:5, type='bic') #aic = 20,1 > 20,2 > 18,1 : bic = 20,1 > 18,1
 e <- est.arma.wge(us.s7, p=18, q=1)
@@ -620,12 +625,12 @@ plotts.sample.wge(us$positivity)
 
 # Check performance
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000178
+eval_model(us$positivity,preds$f, model_name = 'ARMA(18,1) With Weekly/Monthly Trend', e$aic) #ASE .000178
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000707
+eval_model(us$positivity,preds$f, model_name = 'ARMA(18,1) With Weekly/Monthly Trend', e$aic) #ASE .000707
 
-rolling <- rolling_ASE(us, e, s=7, horizon=7, model_name = 'AR(15) with Weekly Trend') #ASE .000093
+rolling <- rolling_ASE(us, e, s=7, horizon=7, model_name = 'ARMA(18,1) with Weekly Trend') #ASE .000093
 
 ```
 
@@ -640,17 +645,17 @@ eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 90, limits=F)
 eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .002678
 
-rolling <- rolling_ASE(us, e, s=7, horizon=7, model_name = 'SigPlusNoise', model_type = 'SigPlusNoise', maxP = 15) #ASE .00012
+rolling <- rolling_ASE(us, e, s=7, horizon=7, model_name = 'SigPlusNoise', model_type = 'SigPlusNoise', p = 15) #ASE .00012
 
 ```
 
 ##### Neural Network
-The neural network model performs fairly well in the short term, and has the best rolling window ASE out of the bunch using minimal parameter tuning (setting lags = 7, and doing 5 fold cross validation).
+The neural network model performs fairly well in the short term, and has the best rolling window ASE out of the bunch using minimal parameter tuning (setting lags = 7, and doing 5 fold cross validation).  It is, however, the most difficult to explain, using Multilayer Perceptrons (MLP) for prediction.  The example below uses two hidden nodes, both of which are autoregression lags, which apply a weigh parameter to the training input, and to each other, resulting in the prediction outcome. 
 
-```{r US_NeuralNetwork}
+```{r US_NeuralNetwork, cache=TRUE}
 
 ts_us <- ts(us$positivity[1:239], start = '1')
-x = mlp(ts_us, lags = 7, hd.auto.type = 'cv', reps=100)
+x = mlp(ts_us, lags = 7, hd.auto.type = 'cv')
 plot(x)
 preds <- predict(x, 7)
 plot(preds)
@@ -658,7 +663,7 @@ eval_model(us$positivity,preds$mean, model_name = 'NNFOR', AIC_val =  0) #ASE = 
 
 
 ts_us <- ts(us$positivity[1:156], start = '1')
-x = mlp(ts_us, hd.auto.type = 'cv', reps=100, sel.lag = T)
+x = mlp(ts_us, hd.auto.type = 'cv', sel.lag = T)
 plot(x)
 preds <- predict(x, 90)
 plot(preds)
@@ -675,7 +680,7 @@ For the US dataset, I will only be using the significant dates data, as the weat
 
 ## Louisiana
 
-```{r multivariate_Louisiana}
+```{r multivariate_Louisiana, cache=TRUE}
 
 la_XDF <- data.frame(
   temp = ts(xdf$AvgTempF),
@@ -685,61 +690,118 @@ la_XDF <- data.frame(
   gathering <- ts(xdf$GatheringBinary)
 )
 
-x = mlp(ts_la, hd.auto.type = 'cv', reps=100, sel.lag = T, xreg = la_XDF)
-plot(x)
-
 ## 7 day forecast
+ts_la <- ts(la$positivity[1:239], start = '1')
+x = mlp(ts_la, hd.auto.type = 'cv', lags=7, xreg = la_XDF)
+plot(x)
 preds <- forecast(x, h=7, xreg=la_XDF)
 plot(preds)
-eval_model(la$positivity, preds$mean,preds$mean,preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .00085
+eval_model(la$positivity, preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .000664
 
 ## 90 day forecast
+ts_la <- ts(la$positivity[1:156], start = '1')
+x = mlp(ts_la, hd.auto.type = 'cv', lags=7, xreg = la_XDF)
+plot(x)
 preds <- forecast(x, h=90, xreg=la_XDF)
 plot(preds)
-eval_model(la$positivity, preds$mean,preds$mean,preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .00085
+eval_model(la$positivity, preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = .000176
 
-
+rolling <- rolling_ASE(la, s=0, horizon=7, model_name = 'NNFOR', model_type = 'NNFOR') #ASE .000535
 ```
 
 ```{r Louisiana_VAR}
 
-VARselect(la$positivity, lag.max = 7, type = "const", season = 7, exogen = NULL) #AIC = 5.04
+VARselect(la$positivity[1:239], lag.max = 7, type = "both", season = 7, exogen = la_XDF[1:239,]) #AIC = -8.5337900068
 #VARselect picks p=2 using AIC and p=1 using BIC
-vfit=VAR(la$positivity,p=2,type='const')
+
+vfit=VAR(cbind(Positivity = la$positivity, la_XDF)[1:239,], p=1,type='both', season = 7)
 preds=predict(vfit,n.ahead=7)
-preds
+eval_model(la$positivity, preds$fcst$Positivity[,1], pred_ul = preds$fcst$Positivity[,3], 
+           pred_ll = preds$fcst$Positivity[,2], model_name = 'VAR', AIC_val = -8.5337900068) #ASE = .000650
+
+vfit=VAR(cbind(Positivity = la$positivity, la_XDF)[1:156,], p=1,type='both', season = 7)
+preds=predict(vfit,n.ahead=90)
+eval_model(la$positivity, preds$fcst$Positivity[,1], pred_ul = preds$fcst$Positivity[,3], 
+           pred_ll = preds$fcst$Positivity[,2], model_name = 'VAR', AIC_val = -8.5337900068) #ASE = .000625
+
+rolling <- rolling_ASE(la, s=7, horizon=7, model_name = 'VAR', model_type = 'VAR', p = 1, df_XDF = la_XDF) #ASE .000281
 
 ```
 
 ## United States
 
-```{r multivariate_US}
+```{r multivariate_US, cache=TRUE}
 
 us_XDF <- data.frame(
   gathering <- ts(xdf$GatheringBinary)
 )
 
 ts_us <- ts(us$positivity[1:239], start = '1')
-
-x = mlp(ts_us, lags = 7, hd.auto.type = 'cv', reps=100, xreg = us_XDF)
+x = mlp(ts_us, lags = 7, hd.auto.type = 'cv', xreg = us_XDF)
 plot(x)
 preds <- predict(x, 7)
 plot(preds)
-eval_model(us$positivity,preds$mean,model_name='NNFOR', AIC_val =  0) #ASE = 
+eval_model(us$positivity,preds$mean,model_name='NNFOR', AIC_val =  0) #ASE = .000204
 
 
 ts_us <- ts(us$positivity[1:156], start = '1')
-x = mlp(ts_us, hd.auto.type = 'cv', reps=100, lags =  7, xreg = us_XDF)
+x = mlp(ts_us, hd.auto.type = 'cv', lags =  7, xreg = us_XDF)
 plot(x)
 preds <- predict(x, 90)
 plot(preds)
-eval_model(us$positivity,preds$mean, model_name='NNFOR', AIC_val =  0) #ASE = 
+eval_model(us$positivity,preds$mean, model_name='NNFOR', AIC_val =  0) #ASE = .004178
+
+rolling <- rolling_ASE(us, s=0, horizon=7, model_name = 'NNFOR', model_type = 'NNFOR') #ASE .000098
+
+```
+
+```{r US_VAR}
+
+VARselect(us$positivity[1:239], lag.max = 7, type = "both", season = 7, exogen = us_XDF[1:239,]) #AIC = -8.5191652146
+#VARselect picks p=4 using BIC and p=6 using AIC... p=6 returns NA values, so using p=4
+
+vfit=VAR(cbind(Positivity = us$positivity, la_XDF)[1:239,], p=4,type='both', season = 7)
+preds=predict(vfit,n.ahead=7)
+eval_model(la$positivity, preds$fcst$Positivity[,1], pred_ul = preds$fcst$Positivity[,3], 
+           pred_ll = preds$fcst$Positivity[,2], model_name = 'VAR', AIC_val = -8.5337900068) #ASE = .001218
+
+vfit=VAR(cbind(Positivity = us$positivity, la_XDF)[1:156,], p=4,type='both', season = 7)
+preds=predict(vfit,n.ahead=90)
+eval_model(us$positivity, preds$fcst$Positivity[,1], pred_ul = preds$fcst$Positivity[,3], 
+           pred_ll = preds$fcst$Positivity[,2], model_name = 'VAR', AIC_val = -8.5337900068) #ASE = .001590
+
+rolling <- rolling_ASE(us, s=7, horizon=7, model_name = 'VAR', model_type = 'VAR', p = 4, df_XDF = us_XDF) #ASE .000122
 
 
 ```
 
 # Model Comparison
 
+|Type|Model|Rolling ASE|Dataset|
+|---|---|---|---|
+|Univariate|Louisiana|AR(15) Weekly|.000277|
+|Univariate|Louisiana|ARIMA(14,0,1) Weekly|.000679|
+|Univariate|Louisiana|SigPlusNoise|.000418|
+|Univariate|Louisiana|MLP|.000637|
+|Multivariate|Louisiana|MLP|.000601|
+|Multivariate|Louisiana|VAR|.000281|
+|---|---|---|---|
+|Univariate|National|AR(9,1)|.000096|
+|Univariate|National|ARIMA(18,0,1) Weekly|.000093|
+|Univariate|National|SigPlusNoise|.000120|
+|Univariate|National|MLP|.000090|
+|Multivariate|National|MLP|.000098|
+|Multivariate|National|VAR|.000122|
 
+```{r ensembling}
+
+
+
+
+
+```
+
+
+# Final Model Selection
 
 # Summary
