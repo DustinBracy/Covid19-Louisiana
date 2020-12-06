@@ -2,10 +2,10 @@
 title: "COVID-19 in Louisiana - A Time Series Analysis"
 author: "Dustin Bracy"
 date: "12/5/2020"
-output: 
+output:
   html_document:
     code_folding: hide
-editor_options: 
+editor_options:
   chunk_output_type: console
 ---
 
@@ -20,7 +20,6 @@ library(RColorBrewer)
 library(gridExtra)
 library(vars)
 library(nnfor)
-#theme_set(theme_fivethirtyeight())
 
 ```
 
@@ -36,7 +35,7 @@ The data comes in pretty good shape, with only a handful of missing values in th
 
 The data ingestion pipeline is fairly simple: download the data directly from the api or website, remove data outside of the March 11 to November 11 window, and add positivity metrics. 
 
-```{r get_Data}
+```{r get_Data, cache=TRUE}
 
 # Get latest US Data & sort by date ascending
 download.file('https://covidtracking.com/data/download/national-history.csv',
@@ -112,15 +111,14 @@ positive_df$US = positive_df$US * lapopratio
 grid.arrange(
   gather(positivity_df, key = Region, value = 'Positivity Rate', -date) %>% 
     ggplot(aes(date, `Positivity Rate`)) + 
-    geom_line(aes(color=Region), size=1) + 
+    geom_line(aes(color=Region), size=.75) + 
     labs(title='Louisiana vs US Positivity Rate', 
          x = 'Date', 
-         y='Positivity Rate') +
-    theme_fivethirtyeight(), 
+         y='Positivity Rate'), 
 
   gather(positive_df, key = Region, value = 'Positive Tests', -date) %>% 
     ggplot(aes(date, `Positive Tests`)) + 
-    geom_line(aes(color=Region), size=1) + 
+    geom_line(aes(color=Region), size=.75) + 
     labs(title='Louisiana vs US Daily New Positive Tests', 
          x = 'Date', 
          y='Positive Tests', 
@@ -200,10 +198,10 @@ eval_model <- function(response, predictions, pred_ul = NA, pred_ll = NA, model_
 ########## example: ARIMA(12,2) ########## 
 e <- est.arma.wge(us$positivity, p=12, q=2)
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta,  n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARMA(12,2)', e$aic) 
+eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARMA(12,2)', AIC_val = e$aic) 
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta=e$theta,  n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARMA(12,2)', e$aic) 
+eval_model(us$positivity,preds$f, preds$ul, preds$ll, 'ARMA(12,2)', AIC_val = e$aic) 
 
 ```
 
@@ -326,6 +324,7 @@ The steps for building and evaluating our models will proceed as follows:
 plotts.sample.wge(la$positivity)
 # Look deeper at spectral density
 parzen.wge(la$positivity, trun=100)
+
 ```
 
 There is strong evidence of serial correlation in this data as can be seen in the peaks in the spectral density plots and the slowly damping, sinusoidal behavior in the autocorrelation function plots.  There is significant evidence of a weekly trend, as can be seen in the Parzen Window (spectral density plot).  The frequency peak at .14 indicates a weekly trend (1/7 = .143), with potentially an echo at .28.  Increasing the truncation point of the Parzen function helps highlight some additional points that suggest possibly a monthly factor as well.  
@@ -380,6 +379,7 @@ ljung.wge(artrans.wge(la.s7, phi.tr = e$phi))
 ljung.wge(artrans.wge(la.s7, phi.tr = e$phi), K = 48)
 acf(e$res)
 pacf(e$res)
+dev.off()
 
 #Compare Spectral Densities
 sims = 5
@@ -412,10 +412,10 @@ plotts.sample.wge(la$positivity)
 
 # Check performance
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly Trend', e$aic) #ASE .000647
+eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly Trend', AIC_val =  e$aic) #ASE .000647
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly Trend', e$aic) #ASE .000202
+eval_model(la$positivity,preds$f, model_name = 'AR(15) With Weekly Trend', AIC_val =  e$aic) #ASE .000202
 
 rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'AR(15) with Weekly Trend') #ASE .000277
 
@@ -432,11 +432,11 @@ e <- est.arma.wge(la.d1.s7,p = 14, q=0)
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 7, lastn = T, limits = F)
 eval_model(la$positivity,preds$f, preds$ul, preds$ll,
-           'ARIMA(14,1,0) With Weekly Trend', e$aic) #ASE = .000541
+           'ARIMA(14,1,0) With Weekly Trend', AIC_val = e$aic) #ASE = .000541
 
 preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta=e$theta, d=1, s=7, n.ahead = 90, lastn = T, limits = F)
 eval_model(la$positivity,preds$f, preds$ul, preds$ll,
-           'ARIMA(14,1,0) With Weekly Trend', e$aic) #ASE = .014017  (BAD)
+           'ARIMA(14,1,0) With Weekly Trend', AIC_val = e$aic) #ASE = .014017  (BAD)
 
 rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'ARIMA(14,1,0) with Weekly Trend') #ASE .000679
 
@@ -460,6 +460,7 @@ rolling <- rolling_ASE(la, e, s=7, horizon=7, model_name = 'SigPlusNoise', model
 ##### Neural Network
 The neural network model performs fairly well, and picks up on the weekly trend, but regresses towards a mean, and is edged out by the AR(15) model from earlier.
 ```{r Louisiana_NeuralNetwork, cache=TRUE}
+
 ts_la <- ts(la$positivity[1:239], start = '1')
 x = mlp(ts_la, lags = 7, hd.auto.type = 'cv', reps=10)
 plot(x)
@@ -539,6 +540,7 @@ ljung.wge(e$res)
 ljung.wge(e$res, K = 48)
 acf(e$res)
 pacf(e$res)
+dev.off()
 
 #Compare Spectral Densities
 sims = 5
@@ -569,12 +571,12 @@ plotts.sample.wge(us$positivity)
 
 # Check performance
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .000121
+eval_model(us$positivity,preds$f, model_name = 'ARMA(9,1)',AIC_val = e$aic) #ASE .000121
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, model_name = 'AR(15) With Weekly/Monthly Trend', e$aic) #ASE .00115
+eval_model(us$positivity,preds$f, model_name = 'ARMA(9,1)', AIC_val = e$aic) #ASE .00115
 
-rolling <- rolling_ASE(us, e, s=0, horizon=7, model_name = 'AR(9,1)') #ASE .000096
+rolling <- rolling_ASE(us, e, s=0, horizon=7, model_name = 'AR(9,1)' ) #ASE .000096
 
 
 ```
@@ -594,6 +596,7 @@ ljung.wge(artrans.wge(us.s7, phi.tr = e$phi))
 ljung.wge(artrans.wge(us.s7, phi.tr = e$phi), K = 48)
 acf(e$res)
 pacf(e$res)
+dev.off()
 
 
 #Compare Spectral Densities
@@ -625,10 +628,10 @@ plotts.sample.wge(us$positivity)
 
 # Check performance
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 7, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, model_name = 'ARMA(18,1) With Weekly/Monthly Trend', e$aic) #ASE .000178
+eval_model(us$positivity,preds$f, model_name = 'ARMA(18,1) With Weekly/Monthly Trend', AIC_val = e$aic) #ASE .000178
 
 preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 90, lastn = T, limits = F)
-eval_model(us$positivity,preds$f, model_name = 'ARMA(18,1) With Weekly/Monthly Trend', e$aic) #ASE .000707
+eval_model(us$positivity,preds$f, model_name = 'ARMA(18,1) With Weekly/Monthly Trend', AIC_val = e$aic) #ASE .000707
 
 rolling <- rolling_ASE(us, e, s=7, horizon=7, model_name = 'ARMA(18,1) with Weekly Trend') #ASE .000093
 
@@ -640,10 +643,10 @@ The signal plus noise model performs very well in the 7 day window, but very poo
 ```{r US_SigPlusNoise}
 
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 7, limits=F)
-eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .000169
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise',AIC_val = 0) #ASE = .000169
 
 preds <- fore.sigplusnoise.wge(us$positivity, max.p = 12, n.ahead = 90, limits=F)
-eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise', 0) #ASE = .002678
+eval_model(us$positivity,preds$f, preds$ul, preds$ll,'SigPlusNoise',AIC_val = 0) #ASE = .002678
 
 rolling <- rolling_ASE(us, e, s=7, horizon=7, model_name = 'SigPlusNoise', model_type = 'SigPlusNoise', p = 15) #ASE .00012
 
@@ -680,6 +683,8 @@ For the US dataset, I will only be using the significant dates data, as the weat
 
 ## Louisiana
 
+
+### MLP
 ```{r multivariate_Louisiana, cache=TRUE}
 
 la_XDF <- data.frame(
@@ -709,6 +714,8 @@ eval_model(la$positivity, preds$mean, model_name = 'NNFOR', AIC_val = 0) #ASE = 
 rolling <- rolling_ASE(la, s=0, horizon=7, model_name = 'NNFOR', model_type = 'NNFOR') #ASE .000535
 ```
 
+
+### VAR
 ```{r Louisiana_VAR}
 
 VARselect(la$positivity[1:239], lag.max = 7, type = "both", season = 7, exogen = la_XDF[1:239,]) #AIC = -8.5337900068
@@ -730,6 +737,7 @@ rolling <- rolling_ASE(la, s=7, horizon=7, model_name = 'VAR', model_type = 'VAR
 
 ## United States
 
+### MLP
 ```{r multivariate_US, cache=TRUE}
 
 us_XDF <- data.frame(
@@ -755,6 +763,8 @@ rolling <- rolling_ASE(us, s=0, horizon=7, model_name = 'NNFOR', model_type = 'N
 
 ```
 
+### VAR
+
 ```{r US_VAR}
 
 VARselect(us$positivity[1:239], lag.max = 7, type = "both", season = 7, exogen = us_XDF[1:239,]) #AIC = -8.5191652146
@@ -776,6 +786,7 @@ rolling <- rolling_ASE(us, s=7, horizon=7, model_name = 'VAR', model_type = 'VAR
 ```
 
 # Model Comparison
+
 
 |Type|Model|Rolling ASE|Dataset|
 |---|---|---|---|
@@ -804,4 +815,43 @@ rolling <- rolling_ASE(us, s=7, horizon=7, model_name = 'VAR', model_type = 'VAR
 
 # Final Model Selection
 
+## LA model: Weekly AR(15) 
+𝜑(1−.682𝐵−.23〖3𝐵〗^2−.179𝐵^3+.144𝐵^4+.035𝐵^5−.073𝐵^6+.644𝐵^7−.364𝐵^8−.082𝐵^9+.066𝐵^10+.128𝐵^11−.015𝐵^12−.216𝐵^13+.341𝐵^14−.306𝐵^15)(1−𝐵7)=𝑎𝑡
+- 7-day ASE = . 000647
+- 90-day ASE = . 000202
+- Rolling ASE = .000277
+- AIC = -8.488985
+
+## US model: AR(9,1)
+𝜑(1−1.271𝐵+.163𝐵^2+.070𝐵^3−.066𝐵^4−.003𝐵^5+.164𝐵^6−.161𝐵^7−.114𝐵^8+.229𝐵^9)=(1−.882𝐵)𝑎𝑡
+- 7-day ASE = .000121
+- 90-day ASE = .001150
+- Rolling ASE = .000096
+- AIC = --8.625600
+
+
+
 # Summary
+In both cases, the Univariate models outperformed their multivariate counterparts.  This may suggest that I selected poorly correlated features to include in the model.  But as a testament to the time series algorithms, they perform just as well as the much more complicated neural networks.
+
+```{r predictions, cache=TRUE}
+e <- est.arma.wge(la.s7, p=15, q=0)
+preds <- fore.aruma.wge(la$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 30, lastn = F, limits = F)
+
+ggplot() + 
+  geom_line(aes(us$date, us$positivity), color='#F8766D') +
+  geom_line(aes(
+    seq(as.Date("2020/11/12"), by = "day", length.out = 30), 
+    preds$f), color='#00BFC4') + labs(title = 'Lousiana 30 day predictions', y = 'Positivity Rate', x='Date')
+
+e <- est.arma.wge(us$positivity, p=9, q=1)
+preds <- fore.aruma.wge(us$positivity, phi = e$phi, theta = e$theta, s=7, n.ahead = 30, lastn = F, limits = F)
+
+ggplot() + 
+  geom_line(aes(us$date, us$positivity), color='#F8766D') +
+  geom_line(aes(
+    seq(as.Date("2020/11/12"), by = "day", length.out = 30), 
+    preds$f), color='#00BFC4')+ labs(title = 'US 30 day predictions', y = 'Positivity Rate', x='Date')
+
+```
+
